@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import (
-    Boolean, DateTime, ForeignKey, Integer, String, Text, func,
+    Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base, TimestampMixin, generate_uuid
@@ -58,6 +58,12 @@ class Issue(Base, TimestampMixin):
     # Fibonacci: 1 2 3 5 8 13 21
     progress_pct: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # 0-100
+
+    # Backlog ordering
+    backlog_rank: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True, index=True,
+        comment="Fractional ordering key for backlog prioritization. Lower = higher priority."
+    )
 
     # Assignment
     assignee_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
