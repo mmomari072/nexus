@@ -161,9 +161,54 @@ async def login_form(
         return HTMLResponse(BASE_HTML.format(title="Login - AgileAI", content=content), status_code=401)
 
     token = create_access_token(user_id=user.id)
-    response = RedirectResponse(url="/backlog/proj-1", status_code=302)
+    response = RedirectResponse(url="/projects", status_code=302)
     response.set_cookie("auth_token", token, httponly=True, max_age=86400)
     return response
+
+
+@router.get("/projects", response_class=HTMLResponse)
+async def projects_page(request: Request):
+    """Display available projects."""
+    auth_token = request.cookies.get("auth_token")
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=302)
+
+    # Sample projects - in production would query database
+    projects = [
+        {"id": "proj-1", "name": "Project Alpha", "description": "Main product backlog"},
+        {"id": "proj-2", "name": "Project Beta", "description": "Infrastructure & DevOps"},
+        {"id": "proj-3", "name": "Project Gamma", "description": "Research & Experimentation"},
+    ]
+
+    projects_html = ""
+    for proj in projects:
+        projects_html += f"""
+        <div style="padding: 1.5rem; border: 1px solid #e2e8f0; border-radius: 0.5rem;
+                    background: white; cursor: pointer; transition: all 0.2s;"
+             onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'"
+             onmouseout="this.style.boxShadow='none'"
+             onclick="location.href='/project/{proj['id']}/backlog'">
+            <h3 style="margin: 0 0 0.5rem 0; color: #2563eb;">{proj['name']}</h3>
+            <p style="margin: 0; color: #666; font-size: 0.9rem;">{proj['description']}</p>
+            <p style="margin: 0.5rem 0 0 0; color: #999; font-size: 0.85rem;">ID: {proj['id']}</p>
+        </div>
+        """
+
+    content = f"""
+    <div class="header-actions">
+        <div>
+            <h1>Projects</h1>
+        </div>
+        <div style="display: flex; gap: 1rem;">
+            <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
+        </div>
+    </div>
+    <p style="color: #666; margin-bottom: 2rem;">Select a project to view its backlog</p>
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem;">
+        {projects_html}
+    </div>
+    """
+    return HTMLResponse(BASE_HTML.format(title="Projects - AgileAI", content=content))
 
 
 @router.get("/register", response_class=HTMLResponse)
@@ -236,12 +281,50 @@ async def register_form(
     await db.refresh(user)
 
     token = create_access_token(user_id=user.id)
-    response = RedirectResponse(url="/backlog/proj-1", status_code=302)
+    response = RedirectResponse(url="/projects", status_code=302)
     response.set_cookie("auth_token", token, httponly=True, max_age=86400)
     return response
 
 
-@router.get("/backlog/{project_id}", response_class=HTMLResponse)
+@router.get("/project/{project_id}", response_class=HTMLResponse)
+async def project_index(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Redirect to project's default tab (backlog)."""
+    return RedirectResponse(url=f"/project/{project_id}/backlog", status_code=302)
+
+
+def get_project_tabs_html(project_id: str, active_tab: str = "backlog") -> str:
+    """Generate project tab navigation HTML."""
+    tabs = [
+        ("backlog", "📋 Backlog"),
+        ("prioritized", "📊 Prioritized"),
+        ("sprints", "🏃 Sprints"),
+        ("settings", "⚙️ Settings"),
+    ]
+
+    tabs_html = '<div style="display: flex; gap: 0.5rem; border-bottom: 2px solid #e2e8f0; margin-bottom: 2rem; padding-bottom: 0;">'
+    for tab_id, tab_label in tabs:
+        is_active = tab_id == active_tab
+        bg_color = "#2563eb" if is_active else "transparent"
+        text_color = "white" if is_active else "#666"
+        border_color = "#2563eb" if is_active else "transparent"
+
+        tabs_html += f'''
+        <a href="/project/{project_id}/{tab_id}"
+           style="padding: 1rem 1.5rem; background: {bg_color}; color: {text_color};
+                   text-decoration: none; border-bottom: 2px solid {border_color};
+                   border-radius: 0.375rem 0.375rem 0 0; font-weight: {'600' if is_active else '500'};">
+            {tab_label}
+        </a>
+        '''
+    tabs_html += '</div>'
+    return tabs_html
+
+
+@router.get("/project/{project_id}/backlog", response_class=HTMLResponse)
 async def backlog_view(
     project_id: str,
     request: Request,
@@ -280,29 +363,34 @@ async def backlog_view(
                 <td>{issue_type}</td>
                 <td>{points}</td>
                 <td style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                    <button hx-get="/backlog/{project_id}/estimate?issue_id={issue_id}"
+                    <button hx-get="/project/{project_id}/backlog/estimate?issue_id={issue_id}"
                             hx-target="#modal-content"
                             class="secondary"
                             style="padding: 0.35rem 0.75rem; font-size: 0.875rem;">
                         Est
                     </button>
-                    {'' if sprint_id else f'<button hx-get="/backlog/{project_id}/sprint-select?issue_id={issue_id}" hx-target="#modal-content" class="secondary" style="padding: 0.35rem 0.75rem; font-size: 0.875rem;">+Sprint</button>'}
+                    {'' if sprint_id else f'<button hx-get="/project/{project_id}/backlog/sprint-select?issue_id={issue_id}" hx-target="#modal-content" class="secondary" style="padding: 0.35rem 0.75rem; font-size: 0.875rem;">+Sprint</button>'}
                 </td>
             </tr>
             """
     else:
         issues_html = '<tr><td colspan="7" style="text-align:center; color: #999;">No issues in backlog</td></tr>'
 
+    tabs_html = get_project_tabs_html(project_id, "backlog")
+
     content = f"""
     <div class="header-actions">
         <div>
-            <h1>Backlog: {project_id}</h1>
+            <h1>{project_id}</h1>
         </div>
-        <div style="display: flex; gap: 1rem;">
-            <a href="/backlog/{project_id}/prioritize" style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border-radius: 0.375rem;">📊 Prioritized View</a>
+        <div>
+            <a href="/projects" style="color: #2563eb; margin-right: 1rem;">← Back to Projects</a>
             <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
         </div>
     </div>
+
+    {tabs_html}
+
     <table>
         <thead>
             <tr>
@@ -378,7 +466,7 @@ async def backlog_view(
                         const issueIds = Array.from(backlogTable.querySelectorAll('tr.draggable'))
                             .map(r => r.dataset.issueId);
 
-                        await fetch('/backlog/{project_id}/bulk-reorder', {{
+                        await fetch('/project/{project_id}/backlog/bulk-reorder', {{
                             method: 'POST',
                             headers: {{'Content-Type': 'application/json'}},
                             body: JSON.stringify({{
@@ -392,9 +480,17 @@ async def backlog_view(
         }}
     </script>
     """
-    return HTMLResponse(BASE_HTML.format(title="Backlog - AgileAI", content=content))
+    return HTMLResponse(BASE_HTML.format(title=f"{project_id} - AgileAI", content=content))
 
 
+@router.get("/backlog/{project_id}", response_class=HTMLResponse)
+async def backlog_view_legacy(project_id: str, request: Request):
+    """Legacy route redirect to new structure."""
+    return RedirectResponse(url=f"/project/{project_id}/backlog", status_code=302)
+
+
+@router.get("/project/{project_id}/backlog/estimate", response_class=HTMLResponse)
+@router.get("/project/{project_id}/prioritized/estimate", response_class=HTMLResponse)
 @router.get("/backlog/{project_id}/estimate", response_class=HTMLResponse)
 async def estimate_form(
     project_id: str,
@@ -404,7 +500,7 @@ async def estimate_form(
 ):
     """Show estimation form for an issue."""
     content = f"""
-    <form hx-post="/backlog/{project_id}/estimate"
+    <form hx-post="/project/{project_id}/backlog/estimate"
           hx-target="#modal-content"
           style="display: flex; flex-direction: column; gap: 1rem;">
         <input type="hidden" name="issue_id" value="{issue_id}">
@@ -437,6 +533,7 @@ async def estimate_form(
     return HTMLResponse(content)
 
 
+@router.post("/project/{project_id}/backlog/estimate", response_class=HTMLResponse)
 @router.post("/backlog/{project_id}/estimate", response_class=HTMLResponse)
 async def save_estimate(
     project_id: str,
@@ -467,6 +564,7 @@ async def save_estimate(
         )
 
 
+@router.get("/project/{project_id}/prioritized", response_class=HTMLResponse)
 @router.get("/backlog/{project_id}/prioritize", response_class=HTMLResponse)
 async def prioritize_view(
     project_id: str,
@@ -504,16 +602,21 @@ async def prioritize_view(
     else:
         issues_html = '<tr><td colspan="4" style="text-align:center; color: #999;">No ranked issues</td></tr>'
 
+    tabs_html = get_project_tabs_html(project_id, "prioritized")
+
     content = f"""
     <div class="header-actions">
         <div>
-            <h1>Prioritized Backlog: {project_id}</h1>
+            <h1>{project_id}</h1>
         </div>
-        <div style="display: flex; gap: 1rem;">
-            <a href="/backlog/{project_id}" style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border-radius: 0.375rem;">📋 Back to Backlog</a>
+        <div>
+            <a href="/projects" style="color: #2563eb; margin-right: 1rem;">← Back to Projects</a>
             <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
         </div>
     </div>
+
+    {tabs_html}
+
     <table>
         <thead>
             <tr>
@@ -528,9 +631,10 @@ async def prioritize_view(
         </tbody>
     </table>
     """
-    return HTMLResponse(BASE_HTML.format(title="Prioritized Backlog - AgileAI", content=content))
+    return HTMLResponse(BASE_HTML.format(title=f"{project_id} - Prioritized - AgileAI", content=content))
 
 
+@router.post("/project/{project_id}/backlog/bulk-reorder")
 @router.post("/backlog/{project_id}/bulk-reorder")
 async def bulk_reorder(
     project_id: str,
@@ -556,6 +660,7 @@ async def bulk_reorder(
         return {"status": "error", "detail": str(e)}, 400
 
 
+@router.get("/project/{project_id}/backlog/sprint-select")
 @router.get("/backlog/{project_id}/sprint-select", response_class=HTMLResponse)
 async def sprint_select_form(
     project_id: str,
@@ -577,7 +682,7 @@ async def sprint_select_form(
         """
 
         content = f"""
-        <form hx-post="/backlog/{project_id}/add-to-sprint"
+        <form hx-post="/project/{project_id}/backlog/add-to-sprint"
               hx-target="#modal-content"
               style="display: flex; flex-direction: column; gap: 1rem;">
             <input type="hidden" name="issue_id" value="{issue_id}">
@@ -600,6 +705,7 @@ async def sprint_select_form(
         return HTMLResponse(f'<div class="error">Error: {str(e)}</div>', status_code=400)
 
 
+@router.post("/project/{project_id}/backlog/add-to-sprint")
 @router.post("/backlog/{project_id}/add-to-sprint", response_class=HTMLResponse)
 async def add_to_sprint(
     project_id: str,
@@ -619,7 +725,7 @@ async def add_to_sprint(
         await db.commit()
 
         return HTMLResponse(
-            f'<div class="success">✓ Issue added to {sprint_id}! <a href="/backlog/{project_id}" hx-boost="true">Reload</a></div>',
+            f'<div class="success">✓ Issue added to {sprint_id}! <a href="/project/{project_id}/backlog" hx-boost="true">Reload</a></div>',
             status_code=200
         )
     except Exception as e:
@@ -627,6 +733,123 @@ async def add_to_sprint(
             f'<div class="error">✗ Error: {str(e)}</div>',
             status_code=400
         )
+
+
+@router.get("/project/{project_id}/sprints", response_class=HTMLResponse)
+async def sprints_view(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Display sprints for a project."""
+    auth_token = request.cookies.get("auth_token")
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=302)
+
+    # Sample sprints
+    sprints = [
+        {"id": "sprint-1", "name": "Sprint 1", "status": "active", "issues": 3},
+        {"id": "sprint-2", "name": "Sprint 2", "status": "planned", "issues": 0},
+        {"id": "sprint-3", "name": "Sprint 3", "status": "completed", "issues": 12},
+    ]
+
+    sprints_html = ""
+    for sprint in sprints:
+        status_color = {"active": "#10b981", "planned": "#f59e0b", "completed": "#6b7280"}
+        color = status_color.get(sprint["status"], "#999")
+        sprints_html += f"""
+        <tr>
+            <td>{sprint['name']}</td>
+            <td><span class="badge" style="background: {color}; color: white;">{sprint['status'].title()}</span></td>
+            <td>{sprint['issues']}</td>
+            <td><a href="/project/{project_id}/sprints/{sprint['id']}">View →</a></td>
+        </tr>
+        """
+
+    tabs_html = get_project_tabs_html(project_id, "sprints")
+
+    content = f"""
+    <div class="header-actions">
+        <div>
+            <h1>{project_id}</h1>
+        </div>
+        <div>
+            <a href="/projects" style="color: #2563eb; margin-right: 1rem;">← Back to Projects</a>
+            <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
+        </div>
+    </div>
+
+    {tabs_html}
+
+    <table>
+        <thead>
+            <tr>
+                <th>Sprint</th>
+                <th>Status</th>
+                <th>Issues</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {sprints_html}
+        </tbody>
+    </table>
+    """
+    return HTMLResponse(BASE_HTML.format(title=f"{project_id} - Sprints - AgileAI", content=content))
+
+
+@router.get("/project/{project_id}/settings", response_class=HTMLResponse)
+async def settings_view(
+    project_id: str,
+    request: Request,
+):
+    """Display project settings."""
+    auth_token = request.cookies.get("auth_token")
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=302)
+
+    tabs_html = get_project_tabs_html(project_id, "settings")
+
+    content = f"""
+    <div class="header-actions">
+        <div>
+            <h1>{project_id}</h1>
+        </div>
+        <div>
+            <a href="/projects" style="color: #2563eb; margin-right: 1rem;">← Back to Projects</a>
+            <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
+        </div>
+    </div>
+
+    {tabs_html}
+
+    <div style="max-width: 600px; background: white; padding: 2rem; border-radius: 0.5rem; border: 1px solid #e2e8f0;">
+        <h2>Project Settings</h2>
+
+        <div style="margin-top: 2rem;">
+            <h3>Project Information</h3>
+            <dl style="line-height: 2;">
+                <dt style="font-weight: bold; color: #666;">Project ID:</dt>
+                <dd>{project_id}</dd>
+                <dt style="font-weight: bold; color: #666;">Name:</dt>
+                <dd>Project Alpha</dd>
+                <dt style="font-weight: bold; color: #666;">Description:</dt>
+                <dd>Main product backlog</dd>
+            </dl>
+        </div>
+
+        <div style="margin-top: 2rem;">
+            <h3>Members</h3>
+            <p style="color: #666;">Members will be managed here</p>
+        </div>
+
+        <div style="margin-top: 2rem;">
+            <h3>Danger Zone</h3>
+            <button style="background: #dc2626; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 0.375rem; cursor: pointer;">Delete Project</button>
+        </div>
+    </div>
+    """
+    return HTMLResponse(BASE_HTML.format(title=f"{project_id} - Settings - AgileAI", content=content))
 
 
 @router.get("/logout", response_class=HTMLResponse)
