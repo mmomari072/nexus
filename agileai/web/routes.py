@@ -220,6 +220,71 @@ async def register_form(
     return response
 
 
+@router.get("/backlog/{project_id}", response_class=HTMLResponse)
+async def backlog_view(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Display backlog for a project."""
+    from sqlalchemy import select
+    from agileai.services.backlog import BacklogService
+
+    # Check if user is authenticated via cookie
+    auth_token = request.cookies.get("auth_token")
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=302)
+
+    svc = BacklogService(db)
+    try:
+        issues = await svc.get_backlog(project_id, include_scores=False)
+    except Exception:
+        issues = []
+
+    issues_html = ""
+    if issues:
+        for issue in issues:
+            status = getattr(issue, "status", "todo")
+            issue_type = getattr(issue, "type", "story")
+            title = getattr(issue, "title", "Untitled")
+            issue_id = getattr(issue, "id", "")
+            issues_html += f"""
+            <tr>
+                <td>{issue_id}</td>
+                <td>{title}</td>
+                <td><span class="badge">{status}</span></td>
+                <td>{issue_type}</td>
+                <td>
+                    <a href="/backlog/{project_id}/estimate?issue_id={issue_id}">Estimate</a>
+                </td>
+            </tr>
+            """
+    else:
+        issues_html = '<tr><td colspan="5" style="text-align:center; color: #999;">No issues in backlog</td></tr>'
+
+    content = f"""
+    <div style="margin-bottom: 2rem;">
+        <h1>Backlog: {project_id}</h1>
+        <a href="/logout" style="color: #dc2626;">Logout</a>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Title</th>
+                <th>Status</th>
+                <th>Type</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {issues_html}
+        </tbody>
+    </table>
+    """
+    return HTMLResponse(BASE_HTML.format(title="Backlog - AgileAI", content=content))
+
+
 @router.get("/logout", response_class=HTMLResponse)
 async def logout(request: Request):
     """Logout and clear cookie."""
