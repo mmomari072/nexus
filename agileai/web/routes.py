@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +12,7 @@ _root = Path(__file__).parent.parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from agileai.api.dependencies import get_db, create_access_token, get_current_user
+from agileai.api.dependencies import get_db, create_access_token
 from agileai.api.routers.auth import hash_password, verify_password
 
 try:
@@ -22,99 +22,535 @@ except ImportError:
 
 router = APIRouter(tags=["web"])
 
-# Simple HTML template
-BASE_HTML = """
-<!DOCTYPE html>
-<html>
+# ---------------------------------------------------------------------------
+# Auth page template (centered, no sidebar)
+# ---------------------------------------------------------------------------
+AUTH_HTML = """<!DOCTYPE html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title}</title>
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; color: #334155; }}
-        header {{ background: white; border-bottom: 1px solid #e2e8f0; padding: 1rem; }}
-        main {{ max-width: 1200px; margin: 0 auto; padding: 2rem 1rem; }}
-        h1 {{ color: #2563eb; margin-bottom: 1rem; }}
-        .header-actions {{ display: flex; gap: 1rem; justify-content: space-between; margin-bottom: 2rem; align-items: center; }}
-        .container {{ max-width: 500px; margin: 2rem auto; }}
-        form {{ display: flex; flex-direction: column; gap: 1rem; }}
-        input, select, textarea {{ padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 0.375rem; font-family: inherit; }}
-        button {{ padding: 0.75rem 1.5rem; background: #2563eb; color: white; border: none;
-                 border-radius: 0.375rem; font-weight: 500; cursor: pointer; }}
-        button:hover {{ background: #1e40af; }}
-        button.secondary {{ background: #6b7280; }}
-        button.secondary:hover {{ background: #4b5563; }}
-        .error {{ background: #fee2e2; color: #991b1b; padding: 0.75rem; border-radius: 0.375rem; }}
-        .success {{ background: #dcfce7; color: #166534; padding: 0.75rem; border-radius: 0.375rem; }}
-        a {{ color: #2563eb; text-decoration: none; }}
-        a:hover {{ text-decoration: underline; }}
-        .actions {{ display: flex; gap: 1rem; margin: 2rem 0; }}
-        table {{ width: 100%; border-collapse: collapse; margin: 1rem 0; }}
-        th, td {{ padding: 0.75rem; text-align: left; border-bottom: 1px solid #e2e8f0; }}
-        th {{ background: #f1f5f9; font-weight: 600; }}
-        .badge {{ display: inline-block; padding: 0.25rem 0.75rem; border-radius: 0.25rem;
-                 font-size: 0.75rem; font-weight: 600; background: #dbeafe; color: #1e40af; }}
-        .modal {{ display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%;
-                 background-color: rgba(0,0,0,0.5); }}
-        .modal.show {{ display: block; }}
-        .modal-content {{ background-color: #fefefe; margin: 5% auto; padding: 2rem; border-radius: 0.5rem;
-                        width: 90%; max-width: 500px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
-        .modal-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }}
-        .modal-header h2 {{ margin: 0; }}
-        .close-btn {{ font-size: 2rem; cursor: pointer; }}
-        .form-group {{ margin-bottom: 1rem; }}
-        .form-group label {{ display: block; margin-bottom: 0.5rem; font-weight: 500; }}
-        .score-display {{ padding: 1rem; background: #f1f5f9; border-radius: 0.375rem; margin-top: 1rem; }}
-        .spinner {{ display: inline-block; width: 1rem; height: 1rem; border: 2px solid #e2e8f0;
-                   border-top-color: #2563eb; border-radius: 50%; animation: spin 0.6s linear infinite; }}
-        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
-        .draggable {{ cursor: move; }}
-        tr.dragging {{ opacity: 0.5; }}
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title}</title>
+  <style>
+    *{{margin:0;padding:0;box-sizing:border-box}}
+    body{{font-family:system-ui,-apple-system,sans-serif;background:linear-gradient(135deg,#1e293b 0%,#334155 100%);min-height:100vh;display:flex;align-items:center;justify-content:center}}
+    .auth-card{{background:white;border-radius:1rem;padding:3rem;width:100%;max-width:420px;box-shadow:0 25px 50px rgba(0,0,0,0.3)}}
+    .logo{{text-align:center;margin-bottom:2rem}}
+    .logo h1{{font-size:1.75rem;font-weight:800;color:#1e293b}}
+    .logo span{{color:#3b82f6}}
+    .logo p{{color:#64748b;margin-top:0.25rem;font-size:0.9rem}}
+    h2{{font-size:1.25rem;font-weight:700;color:#1e293b;margin-bottom:1.5rem}}
+    .form-group{{margin-bottom:1.25rem}}
+    label{{display:block;font-size:0.875rem;font-weight:600;color:#374151;margin-bottom:0.5rem}}
+    input{{width:100%;padding:0.75rem 1rem;border:1.5px solid #e2e8f0;border-radius:0.5rem;font-size:0.95rem;transition:border-color .2s;outline:none;font-family:inherit}}
+    input:focus{{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,0.1)}}
+    .btn-primary{{width:100%;padding:0.875rem;background:#3b82f6;color:white;border:none;border-radius:0.5rem;font-size:1rem;font-weight:600;cursor:pointer;transition:background .2s;margin-top:0.5rem}}
+    .btn-primary:hover{{background:#2563eb}}
+    .link-row{{text-align:center;margin-top:1.5rem;color:#64748b;font-size:0.9rem}}
+    .link-row a{{color:#3b82f6;font-weight:600;text-decoration:none}}
+    .link-row a:hover{{text-decoration:underline}}
+    .error{{background:#fef2f2;border:1px solid #fecaca;color:#dc2626;padding:0.75rem 1rem;border-radius:0.5rem;font-size:0.875rem;margin-bottom:1rem}}
+    .divider{{border:none;border-top:1px solid #e2e8f0;margin:1.5rem 0}}
+  </style>
 </head>
 <body>
-    <header><h2>AgileAI Backlog Manager</h2></header>
-    <main>{content}</main>
+  <div class="auth-card">
+    <div class="logo">
+      <h1>Agile<span>AI</span></h1>
+      <p>Local-first AI-native project management</p>
+    </div>
+    {content}
+  </div>
 </body>
-</html>
-"""
+</html>"""
+
+# ---------------------------------------------------------------------------
+# App shell template (sidebar + topbar)
+# ---------------------------------------------------------------------------
+APP_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title}</title>
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+  <style>
+    *{{margin:0;padding:0;box-sizing:border-box}}
+    :root{{
+      --sidebar-w:240px;
+      --topbar-h:56px;
+      --c-bg:#f1f5f9;
+      --c-surface:white;
+      --c-border:#e2e8f0;
+      --c-text:#1e293b;
+      --c-muted:#64748b;
+      --c-primary:#3b82f6;
+      --c-primary-d:#2563eb;
+      --c-success:#10b981;
+      --c-warn:#f59e0b;
+      --c-danger:#ef4444;
+      --c-sidebar:#0f172a;
+      --c-sidebar-hover:#1e293b;
+      --c-sidebar-text:#94a3b8;
+      --c-sidebar-active:#3b82f6;
+    }}
+    body{{font-family:system-ui,-apple-system,sans-serif;background:var(--c-bg);color:var(--c-text);display:flex;min-height:100vh}}
+
+    /* Sidebar */
+    .sidebar{{width:var(--sidebar-w);background:var(--c-sidebar);display:flex;flex-direction:column;position:fixed;top:0;left:0;height:100vh;z-index:100}}
+    .sidebar-logo{{padding:1.25rem 1.5rem;border-bottom:1px solid #1e293b}}
+    .sidebar-logo h1{{font-size:1.25rem;font-weight:800;color:white}}
+    .sidebar-logo span{{color:var(--c-primary)}}
+    .sidebar-logo p{{font-size:0.7rem;color:var(--c-sidebar-text);margin-top:2px}}
+    .sidebar-section{{padding:1rem 0.75rem 0.5rem;font-size:0.7rem;font-weight:700;letter-spacing:.08em;color:#475569;text-transform:uppercase}}
+    .sidebar-nav{{flex:1;overflow-y:auto;padding:0.5rem 0.75rem}}
+    .nav-item{{display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0.75rem;border-radius:0.5rem;color:var(--c-sidebar-text);text-decoration:none;font-size:0.875rem;font-weight:500;transition:all .15s;cursor:pointer;margin-bottom:2px}}
+    .nav-item:hover{{background:var(--c-sidebar-hover);color:white}}
+    .nav-item.active{{background:var(--c-primary);color:white}}
+    .nav-item .icon{{width:18px;text-align:center;font-size:1rem;flex-shrink:0}}
+    .nav-project{{padding-left:2.25rem;font-size:0.8rem;padding-top:0.4rem;padding-bottom:0.4rem}}
+    .sidebar-footer{{padding:1rem;border-top:1px solid #1e293b}}
+    .user-pill{{display:flex;align-items:center;gap:0.75rem}}
+    .avatar{{width:32px;height:32px;background:var(--c-primary);border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.8rem;flex-shrink:0}}
+    .user-info{{flex:1;min-width:0}}
+    .user-name{{font-size:0.8rem;font-weight:600;color:white;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+    .user-role{{font-size:0.7rem;color:var(--c-sidebar-text)}}
+    .logout-btn{{color:var(--c-sidebar-text);text-decoration:none;font-size:0.8rem;padding:0.25rem 0.5rem;border-radius:0.25rem}}
+    .logout-btn:hover{{color:white}}
+
+    /* Main area */
+    .main-wrap{{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;min-height:100vh}}
+
+    /* Topbar */
+    .topbar{{height:var(--topbar-h);background:var(--c-surface);border-bottom:1px solid var(--c-border);display:flex;align-items:center;padding:0 1.5rem;gap:1rem;position:sticky;top:0;z-index:50}}
+    .breadcrumb{{font-size:0.875rem;color:var(--c-muted);display:flex;align-items:center;gap:0.5rem}}
+    .breadcrumb a{{color:var(--c-muted);text-decoration:none}}
+    .breadcrumb a:hover{{color:var(--c-primary)}}
+    .breadcrumb .sep{{color:#cbd5e1}}
+    .breadcrumb .current{{color:var(--c-text);font-weight:600}}
+    .topbar-search{{flex:1;max-width:400px;position:relative}}
+    .topbar-search input{{width:100%;padding:0.5rem 1rem 0.5rem 2.25rem;border:1.5px solid var(--c-border);border-radius:0.5rem;font-size:0.875rem;background:#f8fafc;outline:none;transition:border-color .2s}}
+    .topbar-search input:focus{{border-color:var(--c-primary);background:white}}
+    .search-icon{{position:absolute;left:0.75rem;top:50%;transform:translateY(-50%);color:var(--c-muted);font-size:0.9rem}}
+    .topbar-actions{{margin-left:auto;display:flex;align-items:center;gap:0.75rem}}
+    .icon-btn{{background:none;border:1.5px solid var(--c-border);border-radius:0.5rem;padding:0.4rem 0.6rem;cursor:pointer;color:var(--c-muted);font-size:1rem;transition:all .15s}}
+    .icon-btn:hover{{border-color:var(--c-primary);color:var(--c-primary)}}
+
+    /* Page content */
+    .page{{padding:1.5rem 2rem;flex:1}}
+
+    /* Tabs */
+    .tabs{{display:flex;gap:0;border-bottom:2px solid var(--c-border);margin-bottom:1.5rem}}
+    .tab{{display:flex;align-items:center;gap:0.5rem;padding:0.75rem 1.25rem;font-size:0.875rem;font-weight:500;color:var(--c-muted);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s;white-space:nowrap}}
+    .tab:hover{{color:var(--c-text)}}
+    .tab.active{{color:var(--c-primary);border-bottom-color:var(--c-primary);font-weight:600}}
+
+    /* Toolbar */
+    .toolbar{{display:flex;align-items:center;gap:0.75rem;margin-bottom:1.25rem;flex-wrap:wrap}}
+    .btn{{display:inline-flex;align-items:center;gap:0.4rem;padding:0.5rem 1rem;border-radius:0.5rem;font-size:0.875rem;font-weight:500;cursor:pointer;border:none;transition:all .15s;text-decoration:none;white-space:nowrap}}
+    .btn-sm{{padding:0.35rem 0.75rem;font-size:0.8rem}}
+    .btn-primary{{background:var(--c-primary);color:white}}
+    .btn-primary:hover{{background:var(--c-primary-d)}}
+    .btn-success{{background:var(--c-success);color:white}}
+    .btn-success:hover{{background:#059669}}
+    .btn-ghost{{background:white;color:var(--c-text);border:1.5px solid var(--c-border)}}
+    .btn-ghost:hover{{border-color:var(--c-primary);color:var(--c-primary)}}
+    .btn-danger{{background:var(--c-danger);color:white}}
+    .btn-danger:hover{{background:#dc2626}}
+    .filter-select{{padding:0.5rem 0.75rem;border:1.5px solid var(--c-border);border-radius:0.5rem;font-size:0.875rem;background:white;color:var(--c-text);cursor:pointer;outline:none}}
+    .filter-select:focus{{border-color:var(--c-primary)}}
+    .search-inline{{padding:0.5rem 0.75rem;border:1.5px solid var(--c-border);border-radius:0.5rem;font-size:0.875rem;background:white;outline:none;min-width:200px}}
+    .search-inline:focus{{border-color:var(--c-primary)}}
+    .spacer{{flex:1}}
+
+    /* Stats row */
+    .stats-row{{display:flex;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap}}
+    .stat-chip{{display:flex;align-items:center;gap:0.4rem;padding:0.35rem 0.75rem;border-radius:2rem;font-size:0.8rem;font-weight:600;background:white;border:1.5px solid var(--c-border)}}
+    .stat-chip .dot{{width:8px;height:8px;border-radius:50%}}
+
+    /* Table */
+    .data-table{{width:100%;border-collapse:collapse;background:white;border-radius:0.75rem;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)}}
+    .data-table th{{padding:0.75rem 1rem;text-align:left;font-size:0.75rem;font-weight:700;color:var(--c-muted);text-transform:uppercase;letter-spacing:.05em;background:#f8fafc;border-bottom:1.5px solid var(--c-border)}}
+    .data-table td{{padding:0.875rem 1rem;border-bottom:1px solid #f1f5f9;font-size:0.875rem;vertical-align:middle}}
+    .data-table tr:last-child td{{border-bottom:none}}
+    .data-table tr:hover td{{background:#f8fafc}}
+    .drag-handle{{color:#cbd5e1;cursor:move;font-size:1.1rem;user-select:none;padding:0 0.25rem}}
+    .drag-handle:hover{{color:var(--c-muted)}}
+    tr.dragging{{opacity:0.4;background:#eff6ff!important}}
+    tr.drag-over td{{border-top:2px solid var(--c-primary)}}
+
+    /* Badges */
+    .badge{{display:inline-flex;align-items:center;gap:0.3rem;padding:0.2rem 0.6rem;border-radius:2rem;font-size:0.75rem;font-weight:600;white-space:nowrap}}
+    .badge-blue{{background:#dbeafe;color:#1d4ed8}}
+    .badge-green{{background:#d1fae5;color:#065f46}}
+    .badge-yellow{{background:#fef3c7;color:#92400e}}
+    .badge-red{{background:#fee2e2;color:#991b1b}}
+    .badge-purple{{background:#ede9fe;color:#5b21b6}}
+    .badge-gray{{background:#f1f5f9;color:#475569}}
+
+    /* Priority dots */
+    .prio{{display:inline-flex;align-items:center;gap:0.35rem;font-size:0.8rem;font-weight:600}}
+    .prio-dot{{width:8px;height:8px;border-radius:50%;flex-shrink:0}}
+    .prio-critical .prio-dot{{background:#ef4444}}
+    .prio-critical{{color:#dc2626}}
+    .prio-high .prio-dot{{background:#f97316}}
+    .prio-high{{color:#ea580c}}
+    .prio-medium .prio-dot{{background:#3b82f6}}
+    .prio-medium{{color:#2563eb}}
+    .prio-low .prio-dot{{background:#94a3b8}}
+    .prio-low{{color:#64748b}}
+
+    /* Issue title link */
+    .issue-link{{color:var(--c-text);text-decoration:none;font-weight:500}}
+    .issue-link:hover{{color:var(--c-primary);text-decoration:underline}}
+    .issue-id{{font-size:0.75rem;color:var(--c-muted);font-family:monospace}}
+
+    /* Status select */
+    .status-sel{{padding:0.3rem 0.5rem;border:1.5px solid transparent;border-radius:0.375rem;font-size:0.78rem;font-weight:600;cursor:pointer;background:transparent;outline:none;transition:border-color .15s}}
+    .status-sel:hover{{border-color:var(--c-border)}}
+    .status-sel:focus{{border-color:var(--c-primary)}}
+
+    /* Empty state */
+    .empty-state{{text-align:center;padding:5rem 2rem;color:var(--c-muted)}}
+    .empty-state .empty-icon{{font-size:3rem;margin-bottom:1rem;opacity:0.4}}
+    .empty-state h3{{font-size:1.1rem;font-weight:600;color:var(--c-text);margin-bottom:0.5rem}}
+    .empty-state p{{font-size:0.9rem}}
+
+    /* Modal */
+    .modal{{display:none;position:fixed;inset:0;z-index:200;background:rgba(15,23,42,0.6);backdrop-filter:blur(4px);align-items:center;justify-content:center}}
+    .modal.show{{display:flex}}
+    .modal-box{{background:white;border-radius:0.75rem;width:90%;max-width:520px;max-height:90vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,0.25)}}
+    .modal-head{{display:flex;justify-content:space-between;align-items:center;padding:1.25rem 1.5rem;border-bottom:1px solid var(--c-border)}}
+    .modal-head h3{{font-size:1rem;font-weight:700;color:var(--c-text)}}
+    .modal-close{{background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--c-muted);line-height:1;padding:0 0.25rem}}
+    .modal-close:hover{{color:var(--c-text)}}
+    .modal-body{{padding:1.5rem}}
+    .form-group{{margin-bottom:1.25rem}}
+    .form-group label{{display:block;font-size:0.8rem;font-weight:600;color:var(--c-text);margin-bottom:0.4rem;text-transform:uppercase;letter-spacing:.04em}}
+    .form-control{{width:100%;padding:0.625rem 0.75rem;border:1.5px solid var(--c-border);border-radius:0.5rem;font-size:0.9rem;outline:none;transition:border-color .2s;font-family:inherit}}
+    .form-control:focus{{border-color:var(--c-primary);box-shadow:0 0 0 3px rgba(59,130,246,0.1)}}
+    .form-row{{display:grid;grid-template-columns:1fr 1fr;gap:1rem}}
+    .modal-foot{{display:flex;justify-content:flex-end;gap:0.75rem;padding:1rem 1.5rem;border-top:1px solid var(--c-border);background:#f8fafc}}
+
+    /* Alerts */
+    .alert{{padding:0.75rem 1rem;border-radius:0.5rem;font-size:0.875rem;margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem}}
+    .alert-success{{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534}}
+    .alert-error{{background:#fef2f2;border:1px solid #fecaca;color:#dc2626}}
+
+    /* Cards (for projects) */
+    .card-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1.25rem}}
+    .project-card{{background:white;border-radius:0.75rem;padding:1.5rem;border:1.5px solid var(--c-border);cursor:pointer;transition:all .15s;text-decoration:none;display:block}}
+    .project-card:hover{{border-color:var(--c-primary);box-shadow:0 4px 12px rgba(59,130,246,0.12);transform:translateY(-1px)}}
+    .project-card h3{{font-size:1rem;font-weight:700;color:var(--c-text);margin-bottom:0.35rem}}
+    .project-card p{{font-size:0.85rem;color:var(--c-muted)}}
+    .project-card .proj-meta{{margin-top:1rem;display:flex;align-items:center;gap:0.5rem}}
+
+    /* Detail page */
+    .detail-grid{{display:grid;grid-template-columns:1fr 300px;gap:1.5rem;align-items:start}}
+    .detail-card{{background:white;border-radius:0.75rem;border:1.5px solid var(--c-border);overflow:hidden}}
+    .detail-card-head{{padding:1rem 1.25rem;border-bottom:1px solid var(--c-border);font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--c-muted)}}
+    .detail-card-body{{padding:1.25rem}}
+    .meta-row{{display:flex;justify-content:space-between;align-items:center;padding:0.625rem 0;border-bottom:1px solid #f1f5f9;font-size:0.875rem}}
+    .meta-row:last-child{{border-bottom:none}}
+    .meta-label{{color:var(--c-muted);font-weight:500}}
+
+    /* Sprint cards */
+    .sprint-card{{background:white;border-radius:0.75rem;border:1.5px solid var(--c-border);padding:1.25rem;margin-bottom:1rem}}
+    .sprint-card-head{{display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem}}
+    .progress-bar{{height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden}}
+    .progress-fill{{height:100%;background:var(--c-primary);border-radius:3px;transition:width .3s}}
+
+    /* Responsive */
+    @media(max-width:768px){{
+      .sidebar{{transform:translateX(-100%)}}
+      .main-wrap{{margin-left:0}}
+    }}
+  </style>
+</head>
+<body>
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h1>Agile<span>AI</span></h1>
+      <p>AI-native project management</p>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="sidebar-section">Workspace</div>
+      <a href="/projects" class="nav-item {nav_projects}">
+        <span class="icon">◫</span> Projects
+      </a>
+      {sidebar_projects}
+      <div class="sidebar-section" style="margin-top:0.75rem">Views</div>
+      <a href="#" class="nav-item">
+        <span class="icon">◈</span> Dashboard
+      </a>
+      <a href="#" class="nav-item">
+        <span class="icon">◉</span> My Issues
+      </a>
+      <a href="#" class="nav-item">
+        <span class="icon">◎</span> Team
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-pill">
+        <div class="avatar">{user_initials}</div>
+        <div class="user-info">
+          <div class="user-name">{user_name}</div>
+          <div class="user-role">Project Member</div>
+        </div>
+        <a href="/logout" class="logout-btn" title="Logout">⇥</a>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main-wrap">
+    <!-- Topbar -->
+    <header class="topbar">
+      <div class="breadcrumb">{breadcrumb}</div>
+      <div class="topbar-search">
+        <span class="search-icon">⌕</span>
+        <input type="text" placeholder="Search issues..." id="globalSearch" oninput="filterTable(this.value)">
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" title="Notifications">🔔</button>
+        <button class="icon-btn" title="API Docs" onclick="window.open('/docs')">⚡</button>
+      </div>
+    </header>
+
+    <!-- Page -->
+    <main class="page">
+      {content}
+    </main>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal" class="modal" onclick="if(event.target===this)closeModal()">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3 id="modal-title">Form</h3>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div id="modal-content" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script>
+    function openModal(title) {{
+      document.getElementById('modal-title').textContent = title || 'Form';
+      document.getElementById('modal').classList.add('show');
+    }}
+    function closeModal() {{
+      document.getElementById('modal').classList.remove('show');
+    }}
+    // Auto-open modal when HTMX loads content into it
+    document.body.addEventListener('htmx:afterSettle', function(e) {{
+      if (e.detail.target && e.detail.target.id === 'modal-content') {{
+        document.getElementById('modal').classList.add('show');
+      }}
+    }});
+    // Table search filter
+    function filterTable(q) {{
+      q = q.toLowerCase();
+      document.querySelectorAll('#backlog-table tr').forEach(function(row) {{
+        row.style.display = !q || row.textContent.toLowerCase().includes(q) ? '' : 'none';
+      }});
+    }}
+    // Drag & drop reorder
+    let dragSrc = null;
+    document.addEventListener('dragstart', function(e) {{
+      const row = e.target.closest('tr[data-issue-id]');
+      if (!row) return;
+      dragSrc = row;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    }});
+    document.addEventListener('dragend', function(e) {{
+      const row = e.target.closest('tr[data-issue-id]');
+      if (row) row.classList.remove('dragging');
+      document.querySelectorAll('tr.drag-over').forEach(r => r.classList.remove('drag-over'));
+    }});
+    document.addEventListener('dragover', function(e) {{
+      const row = e.target.closest('tr[data-issue-id]');
+      if (!row || row === dragSrc) return;
+      e.preventDefault();
+      document.querySelectorAll('tr.drag-over').forEach(r => r.classList.remove('drag-over'));
+      row.classList.add('drag-over');
+    }});
+    document.addEventListener('drop', async function(e) {{
+      const row = e.target.closest('tr[data-issue-id]');
+      if (!row || row === dragSrc || !dragSrc) return;
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      const tbody = row.parentNode;
+      tbody.insertBefore(dragSrc, row);
+      const ordered = Array.from(tbody.querySelectorAll('tr[data-issue-id]')).map(r => r.dataset.issueId);
+      const pid = tbody.dataset.projectId;
+      if (pid) fetch('/project/' + pid + '/backlog/bulk-reorder', {{
+        method:'POST', headers:{{'Content-Type':'application/json'}},
+        body: JSON.stringify({{project_id: pid, ordered_ids: ordered}})
+      }});
+    }});
+    // Status update
+    function updateStatus(issueId, newStatus, projectId) {{
+      fetch('/project/' + projectId + '/backlog/update-status', {{
+        method:'POST', headers:{{'Content-Type':'application/json'}},
+        body: JSON.stringify({{issue_id: issueId, status: newStatus}})
+      }});
+    }}
+  </script>
+</body>
+</html>"""
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+PROJECTS = [
+    {"id": "proj-1", "name": "Project Alpha", "description": "Main product backlog", "issues": 0},
+    {"id": "proj-2", "name": "Project Beta", "description": "Infrastructure & DevOps", "issues": 0},
+    {"id": "proj-3", "name": "Project Gamma", "description": "Research & Experimentation", "issues": 0},
+]
+
+STATUS_BADGE = {
+    "backlog":     ("badge-gray",   "Backlog"),
+    "ready":       ("badge-blue",   "Ready"),
+    "in_progress": ("badge-yellow", "In Progress"),
+    "in_review":   ("badge-purple", "In Review"),
+    "blocked":     ("badge-red",    "Blocked"),
+    "done":        ("badge-green",  "Done"),
+    "cancelled":   ("badge-gray",   "Cancelled"),
+}
+
+STATUS_DOT = {
+    "backlog": "#94a3b8", "ready": "#3b82f6", "in_progress": "#f59e0b",
+    "in_review": "#8b5cf6", "blocked": "#ef4444", "done": "#10b981", "cancelled": "#94a3b8",
+}
+
+TYPE_BADGE = {
+    "story": "badge-blue", "task": "badge-gray", "bug": "badge-red",
+    "feature": "badge-purple", "spike": "badge-yellow", "epic": "badge-green",
+}
+
+
+def status_badge(s: str) -> str:
+    cls, label = STATUS_BADGE.get(s, ("badge-gray", s.replace("_", " ").title()))
+    dot = STATUS_DOT.get(s, "#94a3b8")
+    return f'<span class="badge {cls}"><span style="width:6px;height:6px;border-radius:50%;background:{dot};display:inline-block"></span>{label}</span>'
+
+
+def type_badge(t: str) -> str:
+    cls = TYPE_BADGE.get(t, "badge-gray")
+    return f'<span class="badge {cls}">{t.title()}</span>'
+
+
+def priority_html(p: str) -> str:
+    return f'<span class="prio prio-{p}"><span class="prio-dot"></span>{p.title()}</span>'
+
+
+def render_app(title: str, content: str, project_id: str = "", active_tab: str = "",
+               breadcrumb: str = "", user_name: str = "User") -> str:
+    initials = "".join(w[0].upper() for w in user_name.split()[:2]) or "U"
+
+    sidebar_projects = ""
+    nav_projects = "active" if not project_id else ""
+    for p in PROJECTS:
+        active = "active" if p["id"] == project_id else ""
+        sidebar_projects += f'<a href="/project/{p["id"]}/backlog" class="nav-item nav-project {active}">{p["name"]}</a>\n'
+
+    if not breadcrumb:
+        if project_id:
+            proj_name = next((p["name"] for p in PROJECTS if p["id"] == project_id), project_id)
+            breadcrumb = f'<a href="/projects">Projects</a><span class="sep">›</span><a href="/project/{project_id}/backlog">{proj_name}</a>'
+            if active_tab and active_tab != "backlog":
+                breadcrumb += f'<span class="sep">›</span><span class="current">{active_tab.title()}</span>'
+        else:
+            breadcrumb = '<span class="current">Projects</span>'
+
+    return APP_HTML.format(
+        title=title,
+        content=content,
+        sidebar_projects=sidebar_projects,
+        nav_projects=nav_projects,
+        breadcrumb=breadcrumb,
+        user_initials=initials,
+        user_name=user_name,
+    )
+
+
+def project_tabs(project_id: str, active: str) -> str:
+    tabs = [
+        ("backlog", "📋 Backlog", f"/project/{project_id}/backlog"),
+        ("prioritized", "📊 Prioritized", f"/project/{project_id}/prioritized"),
+        ("sprints", "🏃 Sprints", f"/project/{project_id}/sprints"),
+        ("settings", "⚙️ Settings", f"/project/{project_id}/settings"),
+    ]
+    html = '<div class="tabs">'
+    for tid, label, href in tabs:
+        cls = "tab active" if tid == active else "tab"
+        html += f'<a href="{href}" class="{cls}">{label}</a>'
+    html += '</div>'
+    return html
+
+
+def status_select(issue_id: str, current: str, project_id: str) -> str:
+    opts = [
+        ("backlog", "Backlog"), ("ready", "Ready"), ("in_progress", "In Progress"),
+        ("in_review", "In Review"), ("blocked", "Blocked"), ("done", "Done"),
+    ]
+    color = STATUS_DOT.get(current, "#94a3b8")
+    html = f'<select class="status-sel" style="color:{color}" onchange="updateStatus(\'{issue_id}\',this.value,\'{project_id}\');this.style.color=\'{{\'#94a3b8\':\'#94a3b8\',\'#3b82f6\':\'#3b82f6\',\'#f59e0b\':\'#f59e0b\',\'#8b5cf6\':\'#8b5cf6\',\'#ef4444\':\'#ef4444\',\'#10b981\':\'#10b981\'}}[this.value]||\'#94a3b8\'">'
+    # Simpler version without color update:
+    html = f'<select class="status-sel" onchange="updateStatus(\'{issue_id}\',this.value,\'{project_id}\')">'
+    for val, label in opts:
+        sel = "selected" if val == current else ""
+        html += f'<option value="{val}" {sel}>{label}</option>'
+    html += '</select>'
+    return html
+
+
+def get_user_from_cookie(request: Request) -> str:
+    """Extract user ID from JWT cookie."""
+    from jose import jwt, JWTError
+    token = request.cookies.get("auth_token", "")
+    if not token:
+        return ""
+    try:
+        payload = jwt.decode(token, "your-secret-key-change-in-production", algorithms=["HS256"])
+        return payload.get("sub", "")
+    except JWTError:
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Auth routes
+# ---------------------------------------------------------------------------
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    """Root page with login and register options."""
-    content = """
-    <h1>AgileAI - Backlog Manager</h1>
-    <p>Local-first AI-native Agile project management</p>
-    <div class="actions">
-        <a href="/login" class="btn">🔐 Login</a>
-        <a href="/register" class="btn">📝 Register</a>
-    </div>
-    <div style="margin-top: 2rem;">
-        <p><a href="/docs">📖 API Documentation (Swagger)</a></p>
-        <p><a href="/health">💚 Health Check</a></p>
-    </div>
-    """
-    return HTMLResponse(BASE_HTML.format(title="Home - AgileAI", content=content))
+    if request.cookies.get("auth_token"):
+        return RedirectResponse(url="/projects", status_code=302)
+    return RedirectResponse(url="/login", status_code=302)
 
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    """Login page."""
     content = """
-    <div class="container">
-        <h1>Login</h1>
-        <form method="post" action="/login">
-            <input type="email" name="email" placeholder="Email" required>
-            <input type="password" name="password" placeholder="Password" required>
-            <button type="submit">Login</button>
-        </form>
-        <p style="margin-top: 1rem;">Don't have an account? <a href="/register">Register here</a></p>
-    </div>
+    <h2>Sign in to your account</h2>
+    <form method="post" action="/login">
+      <div class="form-group">
+        <label>Email address</label>
+        <input type="email" name="email" placeholder="you@example.com" required>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" name="password" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="btn-primary">Sign in →</button>
+    </form>
+    <hr class="divider">
+    <div class="link-row">Don't have an account? <a href="/register">Create one</a></div>
     """
-    return HTMLResponse(BASE_HTML.format(title="Login - AgileAI", content=content))
+    return HTMLResponse(AUTH_HTML.format(title="Sign In - AgileAI", content=content))
 
 
 @router.post("/login", response_class=HTMLResponse)
@@ -124,109 +560,66 @@ async def login_form(
     password: str = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """Handle login form submission."""
     from sqlalchemy import select
 
-    if not email or not password:
-        error = '<div class="error">Email and password required</div>'
+    def _login_page(error=""):
+        err_html = f'<div class="error">{error}</div>' if error else ""
         content = f"""
-        <div class="container">
-            <h1>Login</h1>
-            {error}
-            <form method="post" action="/login">
-                <input type="email" name="email" placeholder="Email" required>
-                <input type="password" name="password" placeholder="Password" required>
-                <button type="submit">Login</button>
-            </form>
-        </div>
+        <h2>Sign in to your account</h2>
+        {err_html}
+        <form method="post" action="/login">
+          <div class="form-group">
+            <label>Email address</label>
+            <input type="email" name="email" value="{email or ''}" placeholder="you@example.com" required>
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" name="password" placeholder="••••••••" required>
+          </div>
+          <button type="submit" class="btn-primary">Sign in →</button>
+        </form>
+        <hr class="divider">
+        <div class="link-row">Don't have an account? <a href="/register">Create one</a></div>
         """
-        return HTMLResponse(BASE_HTML.format(title="Login - AgileAI", content=content), status_code=400)
+        return HTMLResponse(AUTH_HTML.format(title="Sign In - AgileAI", content=content), status_code=400)
+
+    if not email or not password:
+        return _login_page("Email and password are required.")
 
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
-
     if not user or not verify_password(password, user.password_hash):
-        error = '<div class="error">Invalid email or password</div>'
-        content = f"""
-        <div class="container">
-            <h1>Login</h1>
-            {error}
-            <form method="post" action="/login">
-                <input type="email" name="email" placeholder="Email" required>
-                <input type="password" name="password" placeholder="Password" required>
-                <button type="submit">Login</button>
-            </form>
-        </div>
-        """
-        return HTMLResponse(BASE_HTML.format(title="Login - AgileAI", content=content), status_code=401)
+        return _login_page("Invalid email or password.")
 
     token = create_access_token(user_id=user.id)
-    response = RedirectResponse(url="/projects", status_code=302)
-    response.set_cookie("auth_token", token, httponly=True, max_age=86400)
-    return response
-
-
-@router.get("/projects", response_class=HTMLResponse)
-async def projects_page(request: Request):
-    """Display available projects."""
-    auth_token = request.cookies.get("auth_token")
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=302)
-
-    # Sample projects - in production would query database
-    projects = [
-        {"id": "proj-1", "name": "Project Alpha", "description": "Main product backlog"},
-        {"id": "proj-2", "name": "Project Beta", "description": "Infrastructure & DevOps"},
-        {"id": "proj-3", "name": "Project Gamma", "description": "Research & Experimentation"},
-    ]
-
-    projects_html = ""
-    for proj in projects:
-        projects_html += f"""
-        <div style="padding: 1.5rem; border: 1px solid #e2e8f0; border-radius: 0.5rem;
-                    background: white; cursor: pointer; transition: all 0.2s;"
-             onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'"
-             onmouseout="this.style.boxShadow='none'"
-             onclick="location.href='/project/{proj['id']}/backlog'">
-            <h3 style="margin: 0 0 0.5rem 0; color: #2563eb;">{proj['name']}</h3>
-            <p style="margin: 0; color: #666; font-size: 0.9rem;">{proj['description']}</p>
-            <p style="margin: 0.5rem 0 0 0; color: #999; font-size: 0.85rem;">ID: {proj['id']}</p>
-        </div>
-        """
-
-    content = f"""
-    <div class="header-actions">
-        <div>
-            <h1>Projects</h1>
-        </div>
-        <div style="display: flex; gap: 1rem;">
-            <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
-        </div>
-    </div>
-    <p style="color: #666; margin-bottom: 2rem;">Select a project to view its backlog</p>
-    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem;">
-        {projects_html}
-    </div>
-    """
-    return HTMLResponse(BASE_HTML.format(title="Projects - AgileAI", content=content))
+    resp = RedirectResponse(url="/projects", status_code=302)
+    resp.set_cookie("auth_token", token, httponly=True, max_age=86400)
+    return resp
 
 
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
-    """Register page."""
     content = """
-    <div class="container">
-        <h1>Register</h1>
-        <form method="post" action="/register">
-            <input type="text" name="name" placeholder="Full Name" required>
-            <input type="email" name="email" placeholder="Email" required>
-            <input type="password" name="password" placeholder="Password" required>
-            <button type="submit">Register</button>
-        </form>
-        <p style="margin-top: 1rem;">Already have an account? <a href="/login">Login here</a></p>
-    </div>
+    <h2>Create your account</h2>
+    <form method="post" action="/register">
+      <div class="form-group">
+        <label>Full name</label>
+        <input type="text" name="name" placeholder="Jane Smith" required>
+      </div>
+      <div class="form-group">
+        <label>Email address</label>
+        <input type="email" name="email" placeholder="you@example.com" required>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" name="password" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="btn-primary">Create account →</button>
+    </form>
+    <hr class="divider">
+    <div class="link-row">Already have an account? <a href="/login">Sign in</a></div>
     """
-    return HTMLResponse(BASE_HTML.format(title="Register - AgileAI", content=content))
+    return HTMLResponse(AUTH_HTML.format(title="Register - AgileAI", content=content))
 
 
 @router.post("/register", response_class=HTMLResponse)
@@ -237,873 +630,628 @@ async def register_form(
     name: str = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Handle registration form submission."""
     from sqlalchemy import select
 
-    if not all([email, password, name]):
-        error = '<div class="error">All fields required</div>'
+    def _reg_page(error=""):
+        err_html = f'<div class="error">{error}</div>' if error else ""
         content = f"""
-        <div class="container">
-            <h1>Register</h1>
-            {error}
-            <form method="post" action="/register">
-                <input type="text" name="name" placeholder="Full Name" required>
-                <input type="email" name="email" placeholder="Email" required>
-                <input type="password" name="password" placeholder="Password" required>
-                <button type="submit">Register</button>
-            </form>
-        </div>
+        <h2>Create your account</h2>
+        {err_html}
+        <form method="post" action="/register">
+          <div class="form-group">
+            <label>Full name</label>
+            <input type="text" name="name" value="{name}" placeholder="Jane Smith" required>
+          </div>
+          <div class="form-group">
+            <label>Email address</label>
+            <input type="email" name="email" value="{email}" placeholder="you@example.com" required>
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" name="password" placeholder="••••••••" required>
+          </div>
+          <button type="submit" class="btn-primary">Create account →</button>
+        </form>
+        <hr class="divider">
+        <div class="link-row">Already have an account? <a href="/login">Sign in</a></div>
         """
-        return HTMLResponse(BASE_HTML.format(title="Register - AgileAI", content=content), status_code=400)
+        return HTMLResponse(AUTH_HTML.format(title="Register - AgileAI", content=content), status_code=400)
 
     result = await db.execute(select(User).where(User.email == email))
-    existing = result.scalar_one_or_none()
-    if existing:
-        error = '<div class="error">Email already registered</div>'
-        content = f"""
-        <div class="container">
-            <h1>Register</h1>
-            {error}
-            <form method="post" action="/register">
-                <input type="text" name="name" placeholder="Full Name" required>
-                <input type="email" name="email" placeholder="Email" required>
-                <input type="password" name="password" placeholder="Password" required>
-                <button type="submit">Register</button>
-            </form>
-        </div>
-        """
-        return HTMLResponse(BASE_HTML.format(title="Register - AgileAI", content=content), status_code=400)
+    if result.scalar_one_or_none():
+        return _reg_page("That email is already registered.")
 
     username = email.split("@")[0]
+    # Make username unique if taken
+    result2 = await db.execute(select(User).where(User.username == username))
+    if result2.scalar_one_or_none():
+        username = username + "_" + str(abs(hash(email)) % 1000)
+
     user = User(email=email, username=username, password_hash=hash_password(password), name=name)
     db.add(user)
     await db.commit()
     await db.refresh(user)
 
     token = create_access_token(user_id=user.id)
-    response = RedirectResponse(url="/projects", status_code=302)
-    response.set_cookie("auth_token", token, httponly=True, max_age=86400)
-    return response
+    resp = RedirectResponse(url="/projects", status_code=302)
+    resp.set_cookie("auth_token", token, httponly=True, max_age=86400)
+    return resp
 
 
-@router.get("/project/{project_id}", response_class=HTMLResponse)
-async def project_index(
-    project_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Redirect to project's default tab (backlog)."""
+@router.get("/logout")
+async def logout():
+    resp = RedirectResponse(url="/login", status_code=302)
+    resp.delete_cookie("auth_token")
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Projects page
+# ---------------------------------------------------------------------------
+@router.get("/projects", response_class=HTMLResponse)
+async def projects_page(request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.cookies.get("auth_token"):
+        return RedirectResponse(url="/login", status_code=302)
+
+    from sqlalchemy import select, func
+
+    cards = ""
+    for proj in PROJECTS:
+        # Count issues for this project
+        try:
+            result = await db.execute(
+                select(func.count()).select_from(Issue).where(Issue.project_id == proj["id"])
+            )
+            count = result.scalar() or 0
+        except Exception:
+            count = 0
+
+        cards += f"""
+        <a href="/project/{proj['id']}/backlog" class="project-card">
+          <h3>{proj['name']}</h3>
+          <p>{proj['description']}</p>
+          <div class="proj-meta">
+            <span class="badge badge-gray">{count} issues</span>
+            <span class="badge badge-blue">Active</span>
+          </div>
+        </a>"""
+
+    content = f"""
+    <div style="margin-bottom:1.5rem;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <h2 style="font-size:1.35rem;font-weight:700">Projects</h2>
+        <p style="color:var(--c-muted);font-size:0.875rem;margin-top:0.25rem">Select a project to manage its backlog</p>
+      </div>
+    </div>
+    <div class="card-grid">{cards}</div>"""
+
+    return HTMLResponse(render_app("Projects - AgileAI", content, user_name="Demo User"))
+
+
+# ---------------------------------------------------------------------------
+# Project redirect
+# ---------------------------------------------------------------------------
+@router.get("/project/{project_id}")
+async def project_index(project_id: str):
     return RedirectResponse(url=f"/project/{project_id}/backlog", status_code=302)
 
 
-def get_project_tabs_html(project_id: str, active_tab: str = "backlog") -> str:
-    """Generate project tab navigation HTML."""
-    tabs = [
-        ("backlog", "📋 Backlog"),
-        ("prioritized", "📊 Prioritized"),
-        ("sprints", "🏃 Sprints"),
-        ("settings", "⚙️ Settings"),
-    ]
-
-    tabs_html = '<div style="display: flex; gap: 0.5rem; border-bottom: 2px solid #e2e8f0; margin-bottom: 2rem; padding-bottom: 0;">'
-    for tab_id, tab_label in tabs:
-        is_active = tab_id == active_tab
-        bg_color = "#2563eb" if is_active else "transparent"
-        text_color = "white" if is_active else "#666"
-        border_color = "#2563eb" if is_active else "transparent"
-
-        tabs_html += f'''
-        <a href="/project/{project_id}/{tab_id}"
-           style="padding: 1rem 1.5rem; background: {bg_color}; color: {text_color};
-                   text-decoration: none; border-bottom: 2px solid {border_color};
-                   border-radius: 0.375rem 0.375rem 0 0; font-weight: {'600' if is_active else '500'};">
-            {tab_label}
-        </a>
-        '''
-    tabs_html += '</div>'
-    return tabs_html
-
-
+# ---------------------------------------------------------------------------
+# Backlog tab
+# ---------------------------------------------------------------------------
 @router.get("/project/{project_id}/backlog", response_class=HTMLResponse)
-async def backlog_view(
-    project_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Display backlog for a project."""
-    from sqlalchemy import select
-    from agileai.services.backlog import BacklogService
-
-    # Check if user is authenticated via cookie
-    auth_token = request.cookies.get("auth_token")
-    if not auth_token:
+@router.get("/backlog/{project_id}", response_class=HTMLResponse)
+async def backlog_view(project_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.cookies.get("auth_token"):
         return RedirectResponse(url="/login", status_code=302)
 
+    from agileai.services.backlog import BacklogService
     svc = BacklogService(db)
     try:
         issues = await svc.get_backlog(project_id, include_scores=False)
     except Exception:
         issues = []
 
-    issues_html = ""
+    proj_name = next((p["name"] for p in PROJECTS if p["id"] == project_id), project_id)
+
+    # Count by status for stat chips
+    counts = {}
+    for iss in issues:
+        s = getattr(iss, "status", "backlog")
+        counts[s] = counts.get(s, 0) + 1
+
+    stat_chips = ""
+    for s, label in [("backlog","Backlog"),("in_progress","In Progress"),("done","Done")]:
+        n = counts.get(s, 0)
+        dot = STATUS_DOT.get(s, "#94a3b8")
+        stat_chips += f'<div class="stat-chip"><span class="dot" style="background:{dot}"></span>{label}: <strong>{n}</strong></div>'
+
+    rows = ""
     if issues:
-        for issue in issues:
-            status = getattr(issue, "status", "todo")
-            issue_type = getattr(issue, "type", "story")
-            title = getattr(issue, "title", "Untitled")
-            issue_id = getattr(issue, "id", "")
-            points = getattr(issue, "story_points", "-")
-            sprint_id = getattr(issue, "sprint_id", None)
-            status_options = """
-            <select style="padding: 0.35rem 0.75rem; font-size: 0.875rem; border: 1px solid #e2e8f0; border-radius: 0.25rem;"
-                    onchange="fetch('/project/{project_id}/backlog/update-status', {{method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify({{issue_id: '{issue_id}', status: this.value}})}})">
-                <option value="backlog" {'selected' if status == 'backlog' else ''}>📋 Backlog</option>
-                <option value="ready" {'selected' if status == 'ready' else ''}>✓ Ready</option>
-                <option value="in_progress" {'selected' if status == 'in_progress' else ''}>🔄 In Progress</option>
-                <option value="in_review" {'selected' if status == 'in_review' else ''}>👀 In Review</option>
-                <option value="done" {'selected' if status == 'done' else ''}>✅ Done</option>
-            </select>
-            """
+        for iss in issues:
+            iid = getattr(iss, "id", "")
+            title = getattr(iss, "title", "Untitled")
+            s = getattr(iss, "status", "backlog")
+            itype = getattr(iss, "issue_type", getattr(iss, "type", "task"))
+            prio = getattr(iss, "priority", "medium")
+            pts = getattr(iss, "story_points", None)
+            pts_html = f'<strong>{pts}</strong>' if pts else '<span style="color:#cbd5e1">—</span>'
+            sprint = getattr(iss, "sprint_id", None)
+            sprint_btn = "" if sprint else f'<button class="btn btn-ghost btn-sm" hx-get="/project/{project_id}/backlog/sprint-select?issue_id={iid}" hx-target="#modal-content" onclick="openModal(\'Add to Sprint\')">+ Sprint</button>'
 
-            issues_html += f"""
-            <tr class="draggable" draggable="true" data-issue-id="{issue_id}">
-                <td style="text-align: center; cursor: move; user-select: none;">⋮</td>
-                <td><a href="/project/{project_id}/issue/{issue_id}" style="color: #2563eb; font-weight: 500;">{issue_id}</a></td>
-                <td><a href="/project/{project_id}/issue/{issue_id}" style="color: #334155; text-decoration: none;">{title}</a></td>
-                <td>{status_options}</td>
-                <td><span class="badge">{issue_type}</span></td>
-                <td>{points}</td>
-                <td style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                    <button hx-get="/project/{project_id}/backlog/estimate?issue_id={issue_id}"
-                            hx-target="#modal-content"
-                            class="secondary"
-                            style="padding: 0.35rem 0.75rem; font-size: 0.875rem;">
-                        Est
-                    </button>
-                    {'' if sprint_id else f'<button hx-get="/project/{project_id}/backlog/sprint-select?issue_id={issue_id}" hx-target="#modal-content" class="secondary" style="padding: 0.35rem 0.75rem; font-size: 0.875rem;">+Sprint</button>'}
-                </td>
-            </tr>
-            """
+            rows += f"""
+            <tr draggable="true" data-issue-id="{iid}">
+              <td><span class="drag-handle">⠿</span></td>
+              <td><span class="issue-id">{iid}</span></td>
+              <td><a href="/project/{project_id}/issue/{iid}" class="issue-link">{title}</a></td>
+              <td>{status_select(iid, s, project_id)}</td>
+              <td>{type_badge(itype)}</td>
+              <td>{priority_html(prio)}</td>
+              <td style="text-align:center">{pts_html}</td>
+              <td>
+                <div style="display:flex;gap:0.4rem;align-items:center">
+                  <button class="btn btn-ghost btn-sm" hx-get="/project/{project_id}/backlog/estimate?issue_id={iid}" hx-target="#modal-content" onclick="openModal('Estimate Issue')">Est</button>
+                  {sprint_btn}
+                </div>
+              </td>
+            </tr>"""
     else:
-        issues_html = '<tr><td colspan="7" style="text-align:center; color: #999;">No issues in backlog</td></tr>'
-
-    tabs_html = get_project_tabs_html(project_id, "backlog")
+        rows = f"""<tr><td colspan="8">
+          <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <h3>No issues yet</h3>
+            <p>Create your first issue to get started</p>
+          </div>
+        </td></tr>"""
 
     content = f"""
-    <div class="header-actions">
-        <div>
-            <h1>{project_id}</h1>
-        </div>
-        <div style="display: flex; gap: 1rem;">
-            <button hx-get="/project/{project_id}/backlog/create-issue"
-                    hx-target="#modal-content"
-                    style="padding: 0.5rem 1rem; background: #10b981; color: white; border: none;
-                           border-radius: 0.375rem; cursor: pointer; font-weight: 500;">
-                ➕ New Issue
-            </button>
-            <a href="/projects" style="color: #2563eb; margin-right: 1rem;">← Back to Projects</a>
-            <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
-        </div>
+    {project_tabs(project_id, "backlog")}
+    <div class="toolbar">
+      <button class="btn btn-success" hx-get="/project/{project_id}/backlog/create-issue" hx-target="#modal-content" onclick="openModal('New Issue')">＋ New Issue</button>
+      <select class="filter-select" onchange="filterStatus(this.value)">
+        <option value="">All Statuses</option>
+        <option value="backlog">Backlog</option>
+        <option value="ready">Ready</option>
+        <option value="in_progress">In Progress</option>
+        <option value="in_review">In Review</option>
+        <option value="done">Done</option>
+      </select>
+      <select class="filter-select" onchange="filterType(this.value)">
+        <option value="">All Types</option>
+        <option value="story">Story</option>
+        <option value="task">Task</option>
+        <option value="bug">Bug</option>
+        <option value="feature">Feature</option>
+      </select>
+      <div class="spacer"></div>
+      <span style="font-size:0.8rem;color:var(--c-muted)">{len(issues)} issues</span>
     </div>
-
-    {tabs_html}
-
-    <table>
-        <thead>
-            <tr>
-                <th style="width: 40px;">⋮</th>
-                <th>ID</th>
-                <th>Title</th>
-                <th>Status</th>
-                <th>Type</th>
-                <th>Points</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody id="backlog-table">
-            {issues_html}
-        </tbody>
+    <div class="stats-row">{stat_chips}</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:36px"></th>
+          <th style="width:100px">ID</th>
+          <th>Title</th>
+          <th style="width:140px">Status</th>
+          <th style="width:90px">Type</th>
+          <th style="width:100px">Priority</th>
+          <th style="width:70px;text-align:center">Pts</th>
+          <th style="width:160px">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="backlog-table" data-project-id="{project_id}">{rows}</tbody>
     </table>
-
-    <div id="modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 id="modal-title">Form</h2>
-                <span class="close-btn" onclick="document.getElementById('modal').classList.remove('show')">&times;</span>
-            </div>
-            <div id="modal-content"></div>
-        </div>
-    </div>
-
     <script>
-        document.getElementById('modal').addEventListener('htmx:load', function() {{
-            document.getElementById('modal').classList.add('show');
+      function filterStatus(v) {{
+        document.querySelectorAll('#backlog-table tr[data-issue-id]').forEach(function(row) {{
+          const sel = row.querySelector('select');
+          row.style.display = !v || (sel && sel.value === v) ? '' : 'none';
         }});
+      }}
+      function filterType(v) {{
+        document.querySelectorAll('#backlog-table tr[data-issue-id]').forEach(function(row) {{
+          const badge = row.querySelector('td:nth-child(5) .badge');
+          row.style.display = !v || (badge && badge.textContent.toLowerCase() === v) ? '' : 'none';
+        }});
+      }}
+    </script>"""
 
-        // Drag and drop for reordering
-        let draggedRow = null;
-        const backlogTable = document.getElementById('backlog-table');
-
-        if (backlogTable) {{
-            const rows = backlogTable.querySelectorAll('tr.draggable');
-
-            rows.forEach(row => {{
-                row.addEventListener('dragstart', (e) => {{
-                    draggedRow = row;
-                    row.classList.add('dragging');
-                    e.dataTransfer.effectAllowed = 'move';
-                }});
-
-                row.addEventListener('dragend', () => {{
-                    row.classList.remove('dragging');
-                    draggedRow = null;
-                }});
-
-                row.addEventListener('dragover', (e) => {{
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                    if (row !== draggedRow) {{
-                        row.style.borderTop = '2px solid #2563eb';
-                    }}
-                }});
-
-                row.addEventListener('dragleave', () => {{
-                    row.style.borderTop = '';
-                }});
-
-                row.addEventListener('drop', async (e) => {{
-                    e.preventDefault();
-                    row.style.borderTop = '';
-
-                    if (row !== draggedRow && draggedRow) {{
-                        // Reorder: move draggedRow before row
-                        backlogTable.insertBefore(draggedRow, row);
-
-                        // Send reorder request
-                        const issueIds = Array.from(backlogTable.querySelectorAll('tr.draggable'))
-                            .map(r => r.dataset.issueId);
-
-                        await fetch('/project/{project_id}/backlog/bulk-reorder', {{
-                            method: 'POST',
-                            headers: {{'Content-Type': 'application/json'}},
-                            body: JSON.stringify({{
-                                project_id: '{project_id}',
-                                ordered_ids: issueIds
-                            }})
-                        }});
-                    }}
-                }});
-            }});
-        }}
-    </script>
-    """
-    return HTMLResponse(BASE_HTML.format(title=f"{project_id} - AgileAI", content=content))
+    return HTMLResponse(render_app(f"{proj_name} · Backlog", content, project_id, "backlog", user_name="Demo User"))
 
 
-@router.get("/backlog/{project_id}", response_class=HTMLResponse)
-async def backlog_view_legacy(project_id: str, request: Request):
-    """Legacy route redirect to new structure."""
-    return RedirectResponse(url=f"/project/{project_id}/backlog", status_code=302)
-
-
+# ---------------------------------------------------------------------------
+# Backlog sub-routes (estimate, sprint, reorder)
+# ---------------------------------------------------------------------------
 @router.get("/project/{project_id}/backlog/estimate", response_class=HTMLResponse)
-@router.get("/project/{project_id}/prioritized/estimate", response_class=HTMLResponse)
 @router.get("/backlog/{project_id}/estimate", response_class=HTMLResponse)
-async def estimate_form(
-    project_id: str,
-    issue_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Show estimation form for an issue."""
-    content = f"""
-    <form hx-post="/project/{project_id}/backlog/estimate"
-          hx-target="#modal-content"
-          style="display: flex; flex-direction: column; gap: 1rem;">
-        <input type="hidden" name="issue_id" value="{issue_id}">
-
-        <div class="form-group">
-            <label for="story_points">Story Points:</label>
-            <select name="story_points" id="story_points" required>
-                <option value="">Select points...</option>
-                <option value="1">1 - Trivial</option>
-                <option value="2">2 - Very Small</option>
-                <option value="3">3 - Small</option>
-                <option value="5">5 - Medium</option>
-                <option value="8">8 - Large</option>
-                <option value="13">13 - Very Large</option>
-                <option value="21">21 - Huge</option>
-            </select>
-        </div>
-
-        <div class="form-group">
-            <label for="rationale">Rationale:</label>
-            <textarea name="rationale" id="rationale" rows="4" placeholder="Why this estimate?" required></textarea>
-        </div>
-
-        <div style="display: flex; gap: 1rem;">
-            <button type="submit">Save Estimate</button>
-            <button type="button" class="secondary" onclick="document.getElementById('modal').classList.remove('show')">Cancel</button>
-        </div>
-    </form>
-    """
-    return HTMLResponse(content)
+async def estimate_form(project_id: str, issue_id: str, request: Request):
+    return HTMLResponse(f"""
+    <form hx-post="/project/{project_id}/backlog/estimate" hx-target="#modal-content">
+      <input type="hidden" name="issue_id" value="{issue_id}">
+      <div class="form-group">
+        <label>Story Points</label>
+        <select name="story_points" class="form-control" required>
+          <option value="">Select…</option>
+          {"".join(f'<option value="{n}">{n} pt{"s" if n>1 else ""} — {d}</option>' for n,d in [(1,"Trivial"),(2,"Very small"),(3,"Small"),(5,"Medium"),(8,"Large"),(13,"Very large"),(21,"Huge")])}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Rationale</label>
+        <textarea name="rationale" class="form-control" rows="3" placeholder="Why this estimate?"></textarea>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Estimate</button>
+      </div>
+    </form>""")
 
 
 @router.post("/project/{project_id}/backlog/estimate", response_class=HTMLResponse)
 @router.post("/backlog/{project_id}/estimate", response_class=HTMLResponse)
 async def save_estimate(
-    project_id: str,
-    issue_id: str = Form(...),
-    story_points: int = Form(...),
-    rationale: str = Form(...),
-    request: Request = None,
-    db: AsyncSession = Depends(get_db),
+    project_id: str, issue_id: str = Form(...), story_points: int = Form(...),
+    rationale: str = Form(default=""), request: Request = None, db: AsyncSession = Depends(get_db),
 ):
-    """Save estimation for an issue."""
     from sqlalchemy import update
-
     try:
-        stmt = update(Issue).where(Issue.id == issue_id).values(
-            story_points=story_points
-        )
-        await db.execute(stmt)
+        await db.execute(update(Issue).where(Issue.id == issue_id).values(story_points=story_points))
         await db.commit()
-
-        return HTMLResponse(
-            '<div class="success">✓ Estimate saved successfully!</div>',
-            status_code=200
-        )
+        return HTMLResponse(f'<div class="alert alert-success">✓ Set to <strong>{story_points} pts</strong>. <a href="/project/{project_id}/backlog" style="color:inherit;font-weight:600">Reload</a> to see updated table.</div>')
     except Exception as e:
-        return HTMLResponse(
-            f'<div class="error">✗ Error saving estimate: {str(e)}</div>',
-            status_code=400
-        )
+        return HTMLResponse(f'<div class="alert alert-error">✗ {e}</div>', status_code=400)
 
 
+@router.get("/project/{project_id}/backlog/create-issue", response_class=HTMLResponse)
+async def create_issue_form(project_id: str, request: Request):
+    return HTMLResponse(f"""
+    <form hx-post="/project/{project_id}/backlog/create-issue" hx-target="#modal-content">
+      <div class="form-group">
+        <label>Title</label>
+        <input type="text" name="title" class="form-control" placeholder="Short descriptive title" required autofocus>
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea name="description" class="form-control" rows="3" placeholder="Context, acceptance criteria…"></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Type</label>
+          <select name="issue_type" class="form-control">
+            <option value="task">Task</option>
+            <option value="story">Story</option>
+            <option value="bug">Bug</option>
+            <option value="feature">Feature</option>
+            <option value="spike">Spike</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Priority</label>
+          <select name="priority" class="form-control">
+            <option value="low">Low</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create Issue</button>
+      </div>
+    </form>""")
+
+
+@router.post("/project/{project_id}/backlog/create-issue", response_class=HTMLResponse)
+async def save_new_issue(
+    project_id: str, title: str = Form(...), description: str = Form(default=""),
+    issue_type: str = Form(default="task"), priority: str = Form(default="medium"),
+    request: Request = None, db: AsyncSession = Depends(get_db),
+):
+    try:
+        import uuid
+        issue_id = f"{project_id.upper()}-{abs(hash(title + str(uuid.uuid4()))) % 9000 + 1000}"
+        new_issue = Issue(id=issue_id, project_id=project_id, title=title,
+                          description=description, issue_type=issue_type, priority=priority, status="backlog")
+        db.add(new_issue)
+        await db.commit()
+        return HTMLResponse(f'<div class="alert alert-success">✓ Issue <strong>{issue_id}</strong> created. <a href="/project/{project_id}/backlog" style="color:inherit;font-weight:600">View backlog</a></div>')
+    except Exception as e:
+        return HTMLResponse(f'<div class="alert alert-error">✗ {e}</div>', status_code=400)
+
+
+@router.get("/project/{project_id}/backlog/sprint-select", response_class=HTMLResponse)
+@router.get("/backlog/{project_id}/sprint-select", response_class=HTMLResponse)
+async def sprint_select_form(project_id: str, issue_id: str, request: Request):
+    return HTMLResponse(f"""
+    <form hx-post="/project/{project_id}/backlog/add-to-sprint" hx-target="#modal-content">
+      <input type="hidden" name="issue_id" value="{issue_id}">
+      <div class="form-group">
+        <label>Sprint</label>
+        <select name="sprint_id" class="form-control" required>
+          <option value="">Select sprint…</option>
+          <option value="sprint-1">Sprint 1 (Active)</option>
+          <option value="sprint-2">Sprint 2 (Planned)</option>
+          <option value="sprint-3">Sprint 3 (Planned)</option>
+        </select>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add to Sprint</button>
+      </div>
+    </form>""")
+
+
+@router.post("/project/{project_id}/backlog/add-to-sprint", response_class=HTMLResponse)
+@router.post("/backlog/{project_id}/add-to-sprint", response_class=HTMLResponse)
+async def add_to_sprint(
+    project_id: str, issue_id: str = Form(...), sprint_id: str = Form(...),
+    request: Request = None, db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import update
+    try:
+        await db.execute(update(Issue).where(Issue.id == issue_id).values(sprint_id=sprint_id))
+        await db.commit()
+        return HTMLResponse(f'<div class="alert alert-success">✓ Added to <strong>{sprint_id}</strong>. <a href="/project/{project_id}/backlog" style="color:inherit;font-weight:600">Reload</a></div>')
+    except Exception as e:
+        return HTMLResponse(f'<div class="alert alert-error">✗ {e}</div>', status_code=400)
+
+
+@router.post("/project/{project_id}/backlog/bulk-reorder")
+@router.post("/backlog/{project_id}/bulk-reorder")
+async def bulk_reorder(project_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import update
+    try:
+        body = await request.json()
+        for order, iid in enumerate(body.get("ordered_ids", [])):
+            await db.execute(update(Issue).where(Issue.id == iid).values(backlog_order=order))
+        await db.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
+@router.post("/project/{project_id}/backlog/update-status")
+async def update_status(project_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import update
+    try:
+        body = await request.json()
+        await db.execute(update(Issue).where(Issue.id == body["issue_id"]).values(status=body["status"]))
+        await db.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Prioritized tab
+# ---------------------------------------------------------------------------
 @router.get("/project/{project_id}/prioritized", response_class=HTMLResponse)
 @router.get("/backlog/{project_id}/prioritize", response_class=HTMLResponse)
-async def prioritize_view(
-    project_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Display prioritized backlog view."""
-    from agileai.services.backlog import BacklogService
-
-    auth_token = request.cookies.get("auth_token")
-    if not auth_token:
+async def prioritize_view(project_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.cookies.get("auth_token"):
         return RedirectResponse(url="/login", status_code=302)
 
+    from agileai.services.backlog import BacklogService
     svc = BacklogService(db)
     try:
         ranked = await svc.prioritize_backlog(project_id)
     except Exception:
         ranked = []
 
-    issues_html = ""
+    proj_name = next((p["name"] for p in PROJECTS if p["id"] == project_id), project_id)
+
+    rows = ""
     if ranked:
-        for i, issue in enumerate(ranked, 1):
-            score = getattr(issue, "_priority_score", None)
-            score_val = score.score if score else 0
-            title = getattr(issue, "title", "Untitled")
-            issue_id = getattr(issue, "id", "")
-            issues_html += f"""
+        for i, iss in enumerate(ranked, 1):
+            score_obj = getattr(iss, "_priority_score", None)
+            score = f"{score_obj.score:.1f}" if score_obj else "—"
+            title = getattr(iss, "title", "Untitled")
+            iid = getattr(iss, "id", "")
+            prio = getattr(iss, "priority", "medium")
+            s = getattr(iss, "status", "backlog")
+            bar_w = min(100, float(score_obj.score if score_obj else 0))
+            rows += f"""
             <tr>
-                <td>{i}</td>
-                <td>{issue_id}</td>
-                <td>{title}</td>
-                <td style="text-align: right;">{score_val:.1f}</td>
-            </tr>
-            """
+              <td><strong style="font-size:1.1rem;color:var(--c-muted)">#{i}</strong></td>
+              <td><span class="issue-id">{iid}</span></td>
+              <td><a href="/project/{project_id}/issue/{iid}" class="issue-link">{title}</a></td>
+              <td>{status_badge(s)}</td>
+              <td>{priority_html(prio)}</td>
+              <td>
+                <div style="display:flex;align-items:center;gap:0.75rem">
+                  <div class="progress-bar" style="width:80px"><div class="progress-fill" style="width:{bar_w}%"></div></div>
+                  <span style="font-size:0.8rem;font-weight:600;color:var(--c-primary)">{score}</span>
+                </div>
+              </td>
+            </tr>"""
     else:
-        issues_html = '<tr><td colspan="4" style="text-align:center; color: #999;">No ranked issues</td></tr>'
-
-    tabs_html = get_project_tabs_html(project_id, "prioritized")
+        rows = '<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">📊</div><h3>No ranked issues</h3><p>Add issues to your backlog first</p></div></td></tr>'
 
     content = f"""
-    <div class="header-actions">
-        <div>
-            <h1>{project_id}</h1>
-        </div>
-        <div>
-            <a href="/projects" style="color: #2563eb; margin-right: 1rem;">← Back to Projects</a>
-            <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
-        </div>
-    </div>
+    {project_tabs(project_id, "prioritized")}
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th style="width:50px">Rank</th>
+          <th style="width:110px">ID</th>
+          <th>Title</th>
+          <th style="width:130px">Status</th>
+          <th style="width:100px">Priority</th>
+          <th style="width:160px">Score</th>
+        </tr>
+      </thead>
+      <tbody>{rows}</tbody>
+    </table>"""
 
-    {tabs_html}
-
-    <table>
-        <thead>
-            <tr>
-                <th>Rank</th>
-                <th>ID</th>
-                <th>Title</th>
-                <th>Score</th>
-            </tr>
-        </thead>
-        <tbody>
-            {issues_html}
-        </tbody>
-    </table>
-    """
-    return HTMLResponse(BASE_HTML.format(title=f"{project_id} - Prioritized - AgileAI", content=content))
+    return HTMLResponse(render_app(f"{proj_name} · Prioritized", content, project_id, "prioritized", user_name="Demo User"))
 
 
-@router.post("/project/{project_id}/backlog/bulk-reorder")
-@router.post("/backlog/{project_id}/bulk-reorder")
-async def bulk_reorder(
-    project_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Bulk reorder backlog issues."""
-    from sqlalchemy import update
-
-    try:
-        body = await request.json()
-        ordered_ids = body.get("ordered_ids", [])
-
-        for order, issue_id in enumerate(ordered_ids):
-            stmt = update(Issue).where(Issue.id == issue_id).values(
-                backlog_order=order
-            )
-            await db.execute(stmt)
-
-        await db.commit()
-        return {"status": "success"}
-    except Exception as e:
-        return {"status": "error", "detail": str(e)}, 400
-
-
-@router.get("/project/{project_id}/backlog/sprint-select")
-@router.get("/backlog/{project_id}/sprint-select", response_class=HTMLResponse)
-async def sprint_select_form(
-    project_id: str,
-    issue_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Show sprint selection form."""
-    from sqlalchemy import select
-
-    try:
-        # Get available sprints for this project
-        # For now, just return a simple form with common sprint names
-        sprint_options = """
-        <option value="">Select a sprint...</option>
-        <option value="sprint-1">Sprint 1</option>
-        <option value="sprint-2">Sprint 2</option>
-        <option value="sprint-3">Sprint 3</option>
-        """
-
-        content = f"""
-        <form hx-post="/project/{project_id}/backlog/add-to-sprint"
-              hx-target="#modal-content"
-              style="display: flex; flex-direction: column; gap: 1rem;">
-            <input type="hidden" name="issue_id" value="{issue_id}">
-
-            <div class="form-group">
-                <label for="sprint_id">Sprint:</label>
-                <select name="sprint_id" id="sprint_id" required>
-                    {sprint_options}
-                </select>
-            </div>
-
-            <div style="display: flex; gap: 1rem;">
-                <button type="submit">Add to Sprint</button>
-                <button type="button" class="secondary" onclick="document.getElementById('modal').classList.remove('show')">Cancel</button>
-            </div>
-        </form>
-        """
-        return HTMLResponse(content)
-    except Exception as e:
-        return HTMLResponse(f'<div class="error">Error: {str(e)}</div>', status_code=400)
-
-
-@router.post("/project/{project_id}/backlog/add-to-sprint")
-@router.post("/backlog/{project_id}/add-to-sprint", response_class=HTMLResponse)
-async def add_to_sprint(
-    project_id: str,
-    issue_id: str = Form(...),
-    sprint_id: str = Form(...),
-    request: Request = None,
-    db: AsyncSession = Depends(get_db),
-):
-    """Add issue to sprint."""
-    from sqlalchemy import update
-
-    try:
-        stmt = update(Issue).where(Issue.id == issue_id).values(
-            sprint_id=sprint_id
-        )
-        await db.execute(stmt)
-        await db.commit()
-
-        return HTMLResponse(
-            f'<div class="success">✓ Issue added to {sprint_id}! <a href="/project/{project_id}/backlog" hx-boost="true">Reload</a></div>',
-            status_code=200
-        )
-    except Exception as e:
-        return HTMLResponse(
-            f'<div class="error">✗ Error: {str(e)}</div>',
-            status_code=400
-        )
-
-
-@router.get("/project/{project_id}/backlog/create-issue", response_class=HTMLResponse)
-async def create_issue_form(
-    project_id: str,
-    request: Request,
-):
-    """Show create issue form."""
-    content = f"""
-    <form hx-post="/project/{project_id}/backlog/create-issue"
-          hx-target="#backlog-table"
-          style="display: flex; flex-direction: column; gap: 1rem;">
-
-        <div class="form-group">
-            <label for="title">Title:</label>
-            <input type="text" name="title" id="title" placeholder="Issue title" required>
-        </div>
-
-        <div class="form-group">
-            <label for="description">Description:</label>
-            <textarea name="description" id="description" rows="4" placeholder="Issue description"></textarea>
-        </div>
-
-        <div class="form-group">
-            <label for="issue_type">Type:</label>
-            <select name="issue_type" id="issue_type">
-                <option value="task">Task</option>
-                <option value="story">Story</option>
-                <option value="bug">Bug</option>
-                <option value="feature">Feature</option>
-                <option value="spike">Spike</option>
-            </select>
-        </div>
-
-        <div class="form-group">
-            <label for="priority">Priority:</label>
-            <select name="priority" id="priority">
-                <option value="low">Low</option>
-                <option value="medium" selected>Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-            </select>
-        </div>
-
-        <div style="display: flex; gap: 1rem;">
-            <button type="submit">Create Issue</button>
-            <button type="button" class="secondary" onclick="document.getElementById('modal').classList.remove('show')">Cancel</button>
-        </div>
-    </form>
-    """
-    return HTMLResponse(content)
-
-
-@router.post("/project/{project_id}/backlog/create-issue", response_class=HTMLResponse)
-async def save_new_issue(
-    project_id: str,
-    title: str = Form(...),
-    description: str = Form(default=""),
-    issue_type: str = Form(default="task"),
-    priority: str = Form(default="medium"),
-    request: Request = None,
-    db: AsyncSession = Depends(get_db),
-):
-    """Create new issue."""
-    from sqlalchemy import func
-    import uuid
-
-    try:
-        # Get user from JWT
-        auth_token = request.cookies.get("auth_token")
-        if not auth_token:
-            return HTMLResponse(
-                '<div class="error">✗ Authentication required</div>',
-                status_code=401
-            )
-
-        # Decode JWT to get user ID
-        from jose import jwt
-        try:
-            payload = jwt.decode(auth_token, "your-secret-key-change-in-production", algorithms=["HS256"])
-            user_id = payload.get("sub")
-        except:
-            user_id = str(uuid.uuid4())  # Fallback user ID
-
-        # Generate issue ID
-        issue_number = abs(hash(title)) % 10000
-        issue_id = f"{project_id.upper()}-{issue_number}"
-
-        new_issue = Issue(
-            id=issue_id,
-            project_id=project_id,
-            title=title,
-            description=description,
-            issue_type=issue_type,
-            priority=priority,
-            status="backlog"
-        )
-        db.add(new_issue)
-        await db.commit()
-        await db.refresh(new_issue)
-
-        return HTMLResponse(
-            f'<div class="success">✓ Issue {issue_id} created! <a href="/project/{project_id}/backlog" hx-boost="true">Reload</a></div>',
-            status_code=200
-        )
-    except Exception as e:
-        return HTMLResponse(
-            f'<div class="error">✗ Error creating issue: {str(e)}</div>',
-            status_code=400
-        )
-
-
-@router.post("/project/{project_id}/backlog/update-status")
-async def update_issue_status(
-    project_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Update issue status."""
-    from sqlalchemy import update
-    import json
-
-    try:
-        body = await request.json()
-        issue_id = body.get("issue_id")
-        status = body.get("status")
-
-        stmt = update(Issue).where(Issue.id == issue_id).values(status=status)
-        await db.execute(stmt)
-        await db.commit()
-
-        return {"status": "success"}
-    except Exception as e:
-        return {"status": "error", "detail": str(e)}, 400
-
-
-@router.get("/project/{project_id}/issue/{issue_id}", response_class=HTMLResponse)
-async def issue_detail_view(
-    project_id: str,
-    issue_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Display issue detail view."""
-    from sqlalchemy import select
-
-    auth_token = request.cookies.get("auth_token")
-    if not auth_token:
-        return RedirectResponse(url="/login", status_code=302)
-
-    try:
-        result = await db.execute(select(Issue).where(Issue.id == issue_id))
-        issue = result.scalar_one_or_none()
-
-        if not issue:
-            return HTMLResponse('<div class="error">Issue not found</div>', status_code=404)
-
-        title = getattr(issue, "title", "Untitled")
-        description = getattr(issue, "description", "")
-        status = getattr(issue, "status", "backlog")
-        issue_type = getattr(issue, "issue_type", "task")
-        priority = getattr(issue, "priority", "medium")
-        points = getattr(issue, "story_points", "-")
-        created_at = getattr(issue, "created_at", "")
-
-        content = f"""
-        <div class="header-actions">
-            <div>
-                <h1>{issue_id}</h1>
-            </div>
-            <div>
-                <a href="/project/{project_id}/backlog" style="color: #2563eb; margin-right: 1rem;">← Back to Backlog</a>
-                <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
-            </div>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 2rem;">
-            <div>
-                <h2>{title}</h2>
-                <div style="margin: 1.5rem 0; padding: 1rem; background: #f8fafc; border-radius: 0.5rem;">
-                    <h3>Description</h3>
-                    <p>{description if description else '<em style="color: #999;">No description</em>'}</p>
-                </div>
-
-                <div style="margin: 1.5rem 0;">
-                    <h3>Activity</h3>
-                    <p style="color: #999;">Created on {created_at}</p>
-                </div>
-            </div>
-
-            <div style="background: white; padding: 1.5rem; border: 1px solid #e2e8f0; border-radius: 0.5rem;">
-                <h3>Details</h3>
-
-                <div style="margin-bottom: 1.5rem;">
-                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Status</label>
-                    <select style="width: 100%; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 0.375rem;"
-                            onchange="fetch('/project/{project_id}/backlog/update-status', {{method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify({{issue_id: '{issue_id}', status: this.value}})}})">
-                        <option value="backlog" {'selected' if status == 'backlog' else ''}>📋 Backlog</option>
-                        <option value="ready" {'selected' if status == 'ready' else ''}>✓ Ready</option>
-                        <option value="in_progress" {'selected' if status == 'in_progress' else ''}>🔄 In Progress</option>
-                        <option value="in_review" {'selected' if status == 'in_review' else ''}>👀 In Review</option>
-                        <option value="done" {'selected' if status == 'done' else ''}>✅ Done</option>
-                    </select>
-                </div>
-
-                <div style="margin-bottom: 1.5rem;">
-                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Type</label>
-                    <span class="badge">{issue_type}</span>
-                </div>
-
-                <div style="margin-bottom: 1.5rem;">
-                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Priority</label>
-                    <span class="badge">{priority}</span>
-                </div>
-
-                <div style="margin-bottom: 1.5rem;">
-                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Story Points</label>
-                    <p>{points}</p>
-                </div>
-
-                <button hx-get="/project/{project_id}/backlog/estimate?issue_id={issue_id}"
-                        hx-target="#modal-content"
-                        style="width: 100%; padding: 0.75rem; background: #3b82f6; color: white; border: none;
-                               border-radius: 0.375rem; cursor: pointer; font-weight: 500;">
-                    Estimate Story Points
-                </button>
-            </div>
-        </div>
-        """
-        return HTMLResponse(BASE_HTML.format(title=f"{issue_id} - AgileAI", content=content))
-    except Exception as e:
-        return HTMLResponse(f'<div class="error">Error: {str(e)}</div>', status_code=500)
-
-
+# ---------------------------------------------------------------------------
+# Sprints tab
+# ---------------------------------------------------------------------------
 @router.get("/project/{project_id}/sprints", response_class=HTMLResponse)
-async def sprints_view(
-    project_id: str,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Display sprints for a project."""
-    auth_token = request.cookies.get("auth_token")
-    if not auth_token:
+async def sprints_view(project_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.cookies.get("auth_token"):
         return RedirectResponse(url="/login", status_code=302)
 
-    # Sample sprints
-    sprints = [
-        {"id": "sprint-1", "name": "Sprint 1", "status": "active", "issues": 3},
-        {"id": "sprint-2", "name": "Sprint 2", "status": "planned", "issues": 0},
-        {"id": "sprint-3", "name": "Sprint 3", "status": "completed", "issues": 12},
+    proj_name = next((p["name"] for p in PROJECTS if p["id"] == project_id), project_id)
+
+    sprints_data = [
+        {"id": "sprint-1", "name": "Sprint 1", "status": "active",    "total": 8, "done": 3, "goal": "Ship auth + backlog API"},
+        {"id": "sprint-2", "name": "Sprint 2", "status": "planned",   "total": 0, "done": 0, "goal": "Web UI & CLI"},
+        {"id": "sprint-3", "name": "Sprint 3", "status": "completed", "total": 12,"done": 12,"goal": "Infrastructure setup"},
     ]
 
-    sprints_html = ""
-    for sprint in sprints:
-        status_color = {"active": "#10b981", "planned": "#f59e0b", "completed": "#6b7280"}
-        color = status_color.get(sprint["status"], "#999")
-        sprints_html += f"""
-        <tr>
-            <td>{sprint['name']}</td>
-            <td><span class="badge" style="background: {color}; color: white;">{sprint['status'].title()}</span></td>
-            <td>{sprint['issues']}</td>
-            <td><a href="/project/{project_id}/sprints/{sprint['id']}">View →</a></td>
-        </tr>
-        """
+    status_colors = {"active": "#10b981", "planned": "#3b82f6", "completed": "#94a3b8"}
+    status_labels = {"active": "Active", "planned": "Planned", "completed": "Completed"}
 
-    tabs_html = get_project_tabs_html(project_id, "sprints")
+    cards = ""
+    for sp in sprints_data:
+        pct = int(sp["done"] / sp["total"] * 100) if sp["total"] else 0
+        col = status_colors[sp["status"]]
+        lbl = status_labels[sp["status"]]
+        cards += f"""
+        <div class="sprint-card">
+          <div class="sprint-card-head">
+            <div>
+              <h3 style="font-size:1rem;font-weight:700">{sp['name']}</h3>
+              <p style="font-size:0.8rem;color:var(--c-muted);margin-top:2px">{sp['goal']}</p>
+            </div>
+            <span class="badge" style="background:{col}20;color:{col}">{lbl}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem">
+            <div class="progress-bar" style="flex:1"><div class="progress-fill" style="width:{pct}%;background:{col}"></div></div>
+            <span style="font-size:0.8rem;font-weight:600;color:{col}">{sp['done']}/{sp['total']}</span>
+          </div>
+          <div style="font-size:0.8rem;color:var(--c-muted)">{pct}% complete</div>
+        </div>"""
 
     content = f"""
-    <div class="header-actions">
-        <div>
-            <h1>{project_id}</h1>
-        </div>
-        <div>
-            <a href="/projects" style="color: #2563eb; margin-right: 1rem;">← Back to Projects</a>
-            <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
-        </div>
-    </div>
+    {project_tabs(project_id, "sprints")}
+    <div style="max-width:700px">{cards}</div>"""
 
-    {tabs_html}
-
-    <table>
-        <thead>
-            <tr>
-                <th>Sprint</th>
-                <th>Status</th>
-                <th>Issues</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {sprints_html}
-        </tbody>
-    </table>
-    """
-    return HTMLResponse(BASE_HTML.format(title=f"{project_id} - Sprints - AgileAI", content=content))
+    return HTMLResponse(render_app(f"{proj_name} · Sprints", content, project_id, "sprints", user_name="Demo User"))
 
 
+# ---------------------------------------------------------------------------
+# Settings tab
+# ---------------------------------------------------------------------------
 @router.get("/project/{project_id}/settings", response_class=HTMLResponse)
-async def settings_view(
-    project_id: str,
-    request: Request,
-):
-    """Display project settings."""
-    auth_token = request.cookies.get("auth_token")
-    if not auth_token:
+async def settings_view(project_id: str, request: Request):
+    if not request.cookies.get("auth_token"):
         return RedirectResponse(url="/login", status_code=302)
 
-    tabs_html = get_project_tabs_html(project_id, "settings")
+    proj = next((p for p in PROJECTS if p["id"] == project_id), {"name": project_id, "description": ""})
+    proj_name = proj["name"]
 
     content = f"""
-    <div class="header-actions">
-        <div>
-            <h1>{project_id}</h1>
+    {project_tabs(project_id, "settings")}
+    <div style="max-width:640px;display:flex;flex-direction:column;gap:1.25rem">
+      <div class="detail-card">
+        <div class="detail-card-head">Project Information</div>
+        <div class="detail-card-body">
+          <div class="meta-row"><span class="meta-label">Project ID</span><code style="font-size:0.85rem;background:#f1f5f9;padding:0.2rem 0.5rem;border-radius:0.25rem">{project_id}</code></div>
+          <div class="meta-row"><span class="meta-label">Name</span><span>{proj_name}</span></div>
+          <div class="meta-row"><span class="meta-label">Description</span><span>{proj['description']}</span></div>
+          <div class="meta-row"><span class="meta-label">Status</span>{status_badge("ready")}</div>
         </div>
-        <div>
-            <a href="/projects" style="color: #2563eb; margin-right: 1rem;">← Back to Projects</a>
-            <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
+      </div>
+      <div class="detail-card">
+        <div class="detail-card-head">Members</div>
+        <div class="detail-card-body">
+          <div class="meta-row">
+            <div style="display:flex;align-items:center;gap:0.75rem">
+              <div class="avatar" style="width:28px;height:28px;font-size:0.7rem">DU</div>
+              <span>Demo User</span>
+            </div>
+            <span class="badge badge-blue">Owner</span>
+          </div>
         </div>
+      </div>
+      <div class="detail-card" style="border-color:#fecaca">
+        <div class="detail-card-head" style="color:var(--c-danger)">Danger Zone</div>
+        <div class="detail-card-body" style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <p style="font-weight:600;font-size:0.9rem">Delete this project</p>
+            <p style="color:var(--c-muted);font-size:0.8rem;margin-top:0.2rem">Permanently remove this project and all its issues.</p>
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="confirm('Delete {proj_name}?')">Delete</button>
+        </div>
+      </div>
+    </div>"""
+
+    return HTMLResponse(render_app(f"{proj_name} · Settings", content, project_id, "settings", user_name="Demo User"))
+
+
+# ---------------------------------------------------------------------------
+# Issue detail
+# ---------------------------------------------------------------------------
+@router.get("/project/{project_id}/issue/{issue_id}", response_class=HTMLResponse)
+async def issue_detail(project_id: str, issue_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.cookies.get("auth_token"):
+        return RedirectResponse(url="/login", status_code=302)
+
+    from sqlalchemy import select
+    try:
+        result = await db.execute(select(Issue).where(Issue.id == issue_id))
+        iss = result.scalar_one_or_none()
+    except Exception:
+        iss = None
+
+    proj_name = next((p["name"] for p in PROJECTS if p["id"] == project_id), project_id)
+
+    if not iss:
+        content = '<div class="alert alert-error">Issue not found.</div><a href="javascript:history.back()" class="btn btn-ghost">← Back</a>'
+        return HTMLResponse(render_app("Issue Not Found", content, project_id, user_name="Demo User"), status_code=404)
+
+    title = getattr(iss, "title", "Untitled")
+    desc = getattr(iss, "description", "") or "<em style='color:var(--c-muted)'>No description provided.</em>"
+    s = getattr(iss, "status", "backlog")
+    itype = getattr(iss, "issue_type", "task")
+    prio = getattr(iss, "priority", "medium")
+    pts = getattr(iss, "story_points", None)
+    created = getattr(iss, "created_at", "")
+
+    breadcrumb = f'<a href="/projects">Projects</a><span class="sep">›</span><a href="/project/{project_id}/backlog">{proj_name}</a><span class="sep">›</span><span class="current">{issue_id}</span>'
+
+    content = f"""
+    <div style="margin-bottom:1.25rem;display:flex;align-items:center;gap:1rem">
+      <a href="/project/{project_id}/backlog" class="btn btn-ghost btn-sm">← Backlog</a>
+      <span class="issue-id" style="font-size:0.9rem">{issue_id}</span>
+      {status_badge(s)}
     </div>
-
-    {tabs_html}
-
-    <div style="max-width: 600px; background: white; padding: 2rem; border-radius: 0.5rem; border: 1px solid #e2e8f0;">
-        <h2>Project Settings</h2>
-
-        <div style="margin-top: 2rem;">
-            <h3>Project Information</h3>
-            <dl style="line-height: 2;">
-                <dt style="font-weight: bold; color: #666;">Project ID:</dt>
-                <dd>{project_id}</dd>
-                <dt style="font-weight: bold; color: #666;">Name:</dt>
-                <dd>Project Alpha</dd>
-                <dt style="font-weight: bold; color: #666;">Description:</dt>
-                <dd>Main product backlog</dd>
-            </dl>
+    <div class="detail-grid">
+      <div style="display:flex;flex-direction:column;gap:1.25rem">
+        <div class="detail-card">
+          <div class="detail-card-body">
+            <h1 style="font-size:1.35rem;font-weight:700;margin-bottom:1rem">{title}</h1>
+            <div style="font-size:0.9rem;line-height:1.7;color:var(--c-text)">{desc}</div>
+          </div>
         </div>
-
-        <div style="margin-top: 2rem;">
-            <h3>Members</h3>
-            <p style="color: #666;">Members will be managed here</p>
+        <div class="detail-card">
+          <div class="detail-card-head">Activity</div>
+          <div class="detail-card-body" style="color:var(--c-muted);font-size:0.85rem">
+            <p>Created {created}</p>
+          </div>
         </div>
-
-        <div style="margin-top: 2rem;">
-            <h3>Danger Zone</h3>
-            <button style="background: #dc2626; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 0.375rem; cursor: pointer;">Delete Project</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:1rem">
+        <div class="detail-card">
+          <div class="detail-card-head">Details</div>
+          <div class="detail-card-body">
+            <div class="meta-row"><span class="meta-label">Status</span>
+              <select class="status-sel" onchange="updateStatus('{issue_id}',this.value,'{project_id}')">
+                {"".join(f'<option value="{v}" {"selected" if v==s else ""}>{l}</option>' for v,l in [("backlog","Backlog"),("ready","Ready"),("in_progress","In Progress"),("in_review","In Review"),("blocked","Blocked"),("done","Done")])}
+              </select>
+            </div>
+            <div class="meta-row"><span class="meta-label">Type</span>{type_badge(itype)}</div>
+            <div class="meta-row"><span class="meta-label">Priority</span>{priority_html(prio)}</div>
+            <div class="meta-row"><span class="meta-label">Story Points</span><strong>{pts or "—"}</strong></div>
+          </div>
         </div>
-    </div>
-    """
-    return HTMLResponse(BASE_HTML.format(title=f"{project_id} - Settings - AgileAI", content=content))
+        <button class="btn btn-primary" style="width:100%" hx-get="/project/{project_id}/backlog/estimate?issue_id={issue_id}" hx-target="#modal-content" onclick="openModal('Estimate Issue')">🎯 Estimate Story Points</button>
+      </div>
+    </div>"""
 
-
-@router.get("/logout", response_class=HTMLResponse)
-async def logout(request: Request):
-    """Logout and clear cookie."""
-    response = RedirectResponse(url="/login", status_code=302)
-    response.delete_cookie("auth_token")
-    return response
+    return HTMLResponse(render_app(f"{issue_id} · {proj_name}", content, project_id, breadcrumb=breadcrumb, user_name="Demo User"))
