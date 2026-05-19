@@ -2,10 +2,8 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import sys
@@ -16,7 +14,6 @@ if str(_root) not in sys.path:
 
 from agileai.api.dependencies import get_db, create_access_token, get_current_user
 from agileai.api.routers.auth import hash_password, verify_password
-from agileai.services.backlog import BacklogService
 
 try:
     from __init__ import User
@@ -25,52 +22,123 @@ except ImportError:
 
 router = APIRouter(tags=["web"])
 
-# Configure Jinja2 templates
-template_dir = Path(__file__).parent / "templates"
-templates = Jinja2Templates(directory=str(template_dir))
+# Simple HTML template
+BASE_HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title}</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; color: #334155; }}
+        header {{ background: white; border-bottom: 1px solid #e2e8f0; padding: 1rem; }}
+        main {{ max-width: 1200px; margin: 0 auto; padding: 2rem 1rem; }}
+        h1 {{ color: #2563eb; margin-bottom: 1rem; }}
+        .container {{ max-width: 500px; margin: 2rem auto; }}
+        form {{ display: flex; flex-direction: column; gap: 1rem; }}
+        input {{ padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 0.375rem; }}
+        button {{ padding: 0.75rem 1.5rem; background: #2563eb; color: white; border: none;
+                 border-radius: 0.375rem; font-weight: 500; cursor: pointer; }}
+        button:hover {{ background: #1e40af; }}
+        .error {{ background: #fee2e2; color: #991b1b; padding: 0.75rem; border-radius: 0.375rem; }}
+        a {{ color: #2563eb; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+        .actions {{ display: flex; gap: 1rem; margin: 2rem 0; }}
+        table {{ width: 100%; border-collapse: collapse; margin: 1rem 0; }}
+        th, td {{ padding: 0.75rem; text-align: left; border-bottom: 1px solid #e2e8f0; }}
+        th {{ background: #f1f5f9; font-weight: 600; }}
+        .badge {{ display: inline-block; padding: 0.25rem 0.75rem; border-radius: 0.25rem;
+                 font-size: 0.75rem; font-weight: 600; background: #dbeafe; color: #1e40af; }}
+    </style>
+</head>
+<body>
+    <header><h2>AgileAI Backlog Manager</h2></header>
+    <main>{content}</main>
+</body>
+</html>
+"""
 
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    """Root page - redirect to login or backlog."""
-    return templates.TemplateResponse("index.html", {"request": request})
+    """Root page with login and register options."""
+    content = """
+    <h1>AgileAI - Backlog Manager</h1>
+    <p>Local-first AI-native Agile project management</p>
+    <div class="actions">
+        <a href="/login" class="btn">🔐 Login</a>
+        <a href="/register" class="btn">📝 Register</a>
+    </div>
+    <div style="margin-top: 2rem;">
+        <p><a href="/docs">📖 API Documentation (Swagger)</a></p>
+        <p><a href="/health">💚 Health Check</a></p>
+    </div>
+    """
+    return HTMLResponse(BASE_HTML.format(title="Home - AgileAI", content=content))
 
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Login page."""
-    return templates.TemplateResponse("auth/login.html", {"request": request})
+    content = """
+    <div class="container">
+        <h1>Login</h1>
+        <form method="post" action="/login">
+            <input type="email" name="email" placeholder="Email" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <button type="submit">Login</button>
+        </form>
+        <p style="margin-top: 1rem;">Don't have an account? <a href="/register">Register here</a></p>
+    </div>
+    """
+    return HTMLResponse(BASE_HTML.format(title="Login - AgileAI", content=content))
 
 
 @router.post("/login", response_class=HTMLResponse)
 async def login_form(
     request: Request,
-    email: str = None,
-    password: str = None,
+    email: str = Form(None),
+    password: str = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
     """Handle login form submission."""
     from sqlalchemy import select
 
     if not email or not password:
-        return templates.TemplateResponse(
-            "auth/login.html",
-            {"request": request, "error": "Email and password required"},
-            status_code=400,
-        )
+        error = '<div class="error">Email and password required</div>'
+        content = f"""
+        <div class="container">
+            <h1>Login</h1>
+            {error}
+            <form method="post" action="/login">
+                <input type="email" name="email" placeholder="Email" required>
+                <input type="password" name="password" placeholder="Password" required>
+                <button type="submit">Login</button>
+            </form>
+        </div>
+        """
+        return HTMLResponse(BASE_HTML.format(title="Login - AgileAI", content=content), status_code=400)
 
-    # Find user
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(password, user.password_hash):
-        return templates.TemplateResponse(
-            "auth/login.html",
-            {"request": request, "error": "Invalid email or password"},
-            status_code=401,
-        )
+        error = '<div class="error">Invalid email or password</div>'
+        content = f"""
+        <div class="container">
+            <h1>Login</h1>
+            {error}
+            <form method="post" action="/login">
+                <input type="email" name="email" placeholder="Email" required>
+                <input type="password" name="password" placeholder="Password" required>
+                <button type="submit">Login</button>
+            </form>
+        </div>
+        """
+        return HTMLResponse(BASE_HTML.format(title="Login - AgileAI", content=content), status_code=401)
 
-    # Create token and redirect
     token = create_access_token(user_id=user.id)
     response = RedirectResponse(url="/backlog/proj-1", status_code=302)
     response.set_cookie("auth_token", token, httponly=True, max_age=86400)
@@ -80,173 +148,76 @@ async def login_form(
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
     """Register page."""
-    return templates.TemplateResponse("auth/register.html", {"request": request})
+    content = """
+    <div class="container">
+        <h1>Register</h1>
+        <form method="post" action="/register">
+            <input type="text" name="name" placeholder="Full Name" required>
+            <input type="email" name="email" placeholder="Email" required>
+            <input type="password" name="password" placeholder="Password" required>
+            <button type="submit">Register</button>
+        </form>
+        <p style="margin-top: 1rem;">Already have an account? <a href="/login">Login here</a></p>
+    </div>
+    """
+    return HTMLResponse(BASE_HTML.format(title="Register - AgileAI", content=content))
 
 
 @router.post("/register", response_class=HTMLResponse)
 async def register_form(
     request: Request,
-    email: str = None,
-    password: str = None,
-    name: str = None,
+    email: str = Form(...),
+    password: str = Form(...),
+    name: str = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
     """Handle registration form submission."""
     from sqlalchemy import select
 
     if not all([email, password, name]):
-        return templates.TemplateResponse(
-            "auth/register.html",
-            {"request": request, "error": "All fields required"},
-            status_code=400,
-        )
+        error = '<div class="error">All fields required</div>'
+        content = f"""
+        <div class="container">
+            <h1>Register</h1>
+            {error}
+            <form method="post" action="/register">
+                <input type="text" name="name" placeholder="Full Name" required>
+                <input type="email" name="email" placeholder="Email" required>
+                <input type="password" name="password" placeholder="Password" required>
+                <button type="submit">Register</button>
+            </form>
+        </div>
+        """
+        return HTMLResponse(BASE_HTML.format(title="Register - AgileAI", content=content), status_code=400)
 
-    # Check if user exists
     result = await db.execute(select(User).where(User.email == email))
     existing = result.scalar_one_or_none()
     if existing:
-        return templates.TemplateResponse(
-            "auth/register.html",
-            {"request": request, "error": "Email already registered"},
-            status_code=400,
-        )
+        error = '<div class="error">Email already registered</div>'
+        content = f"""
+        <div class="container">
+            <h1>Register</h1>
+            {error}
+            <form method="post" action="/register">
+                <input type="text" name="name" placeholder="Full Name" required>
+                <input type="email" name="email" placeholder="Email" required>
+                <input type="password" name="password" placeholder="Password" required>
+                <button type="submit">Register</button>
+            </form>
+        </div>
+        """
+        return HTMLResponse(BASE_HTML.format(title="Register - AgileAI", content=content), status_code=400)
 
-    # Create user
-    user = User(
-        email=email,
-        password_hash=hash_password(password),
-        name=name,
-    )
+    username = email.split("@")[0]
+    user = User(email=email, username=username, password_hash=hash_password(password), name=name)
     db.add(user)
     await db.commit()
     await db.refresh(user)
 
-    # Log them in
     token = create_access_token(user_id=user.id)
     response = RedirectResponse(url="/backlog/proj-1", status_code=302)
     response.set_cookie("auth_token", token, httponly=True, max_age=86400)
     return response
-
-
-def get_token_from_cookie(request: Request) -> Optional[str]:
-    """Extract JWT token from cookie."""
-    return request.cookies.get("auth_token")
-
-
-async def get_current_user_from_cookie(
-    request: Request, db: AsyncSession = Depends(get_db)
-) -> Optional[dict]:
-    """Get current user from cookie token."""
-    token = get_token_from_cookie(request)
-    if not token:
-        return None
-
-    from jose import jwt
-    from agileai.api.dependencies import SECRET_KEY, ALGORITHM
-    from sqlalchemy import select
-
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id:
-            result = await db.execute(select(User).where(User.id == user_id))
-            user = result.scalar_one_or_none()
-            if user:
-                return {"user_id": user_id, "user": user}
-    except Exception:
-        pass
-    return None
-
-
-@router.get("/backlog/{project_id}", response_class=HTMLResponse)
-async def backlog_view(
-    request: Request,
-    project_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """Main backlog view."""
-    user_info = await get_current_user_from_cookie(request, db)
-    if not user_info:
-        return RedirectResponse(url="/login", status_code=302)
-
-    svc = BacklogService(db)
-    backlog = await svc.get_backlog(project_id)
-
-    return templates.TemplateResponse(
-        "backlog/list.html",
-        {
-            "request": request,
-            "project_id": project_id,
-            "issues": backlog,
-            "user": user_info["user"],
-        },
-    )
-
-
-@router.get("/backlog/{project_id}/estimate", response_class=HTMLResponse)
-async def estimate_modal(
-    request: Request,
-    project_id: str,
-    issue_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """Get estimation form modal (HTMX)."""
-    from sqlalchemy import select
-
-    user_info = await get_current_user_from_cookie(request, db)
-    if not user_info:
-        return HTMLResponse("Unauthorized", status_code=401)
-
-    result = await db.execute(
-        select(lambda: None).from_statement(
-            f"SELECT * FROM issues WHERE id = '{issue_id}' AND project_id = '{project_id}'"
-        )
-    )
-
-    return templates.TemplateResponse(
-        "backlog/estimate_modal.html",
-        {
-            "request": request,
-            "project_id": project_id,
-            "issue_id": issue_id,
-        },
-    )
-
-
-@router.post("/backlog/{project_id}/estimate", response_class=HTMLResponse)
-async def submit_estimate(
-    request: Request,
-    project_id: str,
-    issue_id: str,
-    difficulty: str,
-    importance: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """Submit estimation (HTMX)."""
-    user_info = await get_current_user_from_cookie(request, db)
-    if not user_info:
-        return HTMLResponse("Unauthorized", status_code=401)
-
-    svc = BacklogService(db)
-    result = await svc.request_estimate(issue_id)
-
-    # Return updated issue row
-    from sqlalchemy import select
-
-    issue_result = await db.execute(
-        select(lambda: None).from_statement(
-            f"SELECT * FROM issues WHERE id = '{issue_id}'"
-        )
-    )
-
-    return templates.TemplateResponse(
-        "backlog/issue_row.html",
-        {
-            "request": request,
-            "issue": None,  # TODO: fetch actual issue
-            "story_points": result.suggested_points,
-        },
-    )
 
 
 @router.get("/logout", response_class=HTMLResponse)

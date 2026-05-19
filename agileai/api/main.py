@@ -44,6 +44,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Configure templates early
+from fastapi.templating import Jinja2Templates
+template_path = str(Path(__file__).parent.parent / "web" / "templates")
+app.state.templates = Jinja2Templates(directory=template_path)
+
 
 # ---------------------------------------------------------------------------
 # Health check
@@ -58,9 +63,10 @@ async def health_check():
 
 
 # ---------------------------------------------------------------------------
-# Static files and web UI
+# Static files
 # ---------------------------------------------------------------------------
 from fastapi.staticfiles import StaticFiles
+
 static_dir = Path(__file__).parent.parent / "web" / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")

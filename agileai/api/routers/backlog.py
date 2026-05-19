@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,7 @@ _root = Path(__file__).parent.parent.parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from database import get_db
+from agileai.api.dependencies import get_db, get_current_user
 from agileai.schemas.backlog import (
     BacklogIssueResponse,
     BacklogListResponse,
@@ -48,6 +48,7 @@ def get_backlog_service(session: AsyncSession = Depends(get_db)) -> BacklogServi
 async def list_backlog(
     project_id: str,
     issue_type: Optional[str] = None,
+    current_user: Annotated[dict, Depends(get_current_user)] = None,
     include_scores: bool = False,
     limit: int = 100,
     offset: int = 0,
@@ -77,6 +78,7 @@ async def list_backlog(
 async def request_estimation(
     project_id: str,
     body: EstimationRequest,
+    current_user: Annotated[dict, Depends(get_current_user)] = None,
     svc: BacklogService = Depends(get_backlog_service),
 ) -> EstimationResponse:
     """Request story point estimation for an issue."""
@@ -102,6 +104,7 @@ async def request_estimation(
 async def rank_backlog(
     project_id: str,
     body: PrioritizationRequest,
+    current_user: Annotated[dict, Depends(get_current_user)] = None,
     svc: BacklogService = Depends(get_backlog_service),
 ) -> RankedBacklogResponse:
     """Get priority-ranked backlog for a project."""
@@ -126,6 +129,7 @@ async def rank_backlog(
 async def check_readiness(
     project_id: str,
     body: ReadinessCheckRequest,
+    current_user: Annotated[dict, Depends(get_current_user)] = None,
     svc: BacklogService = Depends(get_backlog_service),
 ) -> DORCheckResponse:
     """Evaluate an issue against Definition of Ready criteria."""
@@ -156,6 +160,7 @@ async def reorder_item(
     project_id: str,
     issue_id: str,
     body: ReorderRequest,
+    current_user: Annotated[dict, Depends(get_current_user)] = None,
     svc: BacklogService = Depends(get_backlog_service),
 ) -> ReorderResponse:
     """Reorder a single backlog item."""
@@ -175,6 +180,7 @@ async def reorder_item(
 async def bulk_reorder(
     project_id: str,
     body: BulkReorderRequest,
+    current_user: Annotated[dict, Depends(get_current_user)] = None,
     svc: BacklogService = Depends(get_backlog_service),
 ) -> dict:
     """Bulk reorder backlog items (e.g., from drag-drop UI)."""
@@ -188,6 +194,7 @@ async def bulk_reorder(
 async def pull_into_sprint(
     project_id: str,
     body: SprintPullRequest,
+    current_user: Annotated[dict, Depends(get_current_user)] = None,
     svc: BacklogService = Depends(get_backlog_service),
 ) -> SprintPullResponse:
     """Move ready issues into a sprint."""
@@ -206,6 +213,7 @@ async def pull_into_sprint(
 async def remove_from_sprint(
     project_id: str,
     issue_id: str,
+    current_user: Annotated[dict, Depends(get_current_user)] = None,
     svc: BacklogService = Depends(get_backlog_service),
 ) -> dict:
     """Remove an issue from a sprint back to the backlog."""
