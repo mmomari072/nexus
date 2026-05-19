@@ -16,9 +16,9 @@ from agileai.api.dependencies import get_db, create_access_token, get_current_us
 from agileai.api.routers.auth import hash_password, verify_password
 
 try:
-    from __init__ import User
+    from __init__ import User, Issue
 except ImportError:
-    from agileai.models import User
+    from agileai.models import User, Issue
 
 router = APIRouter(tags=["web"])
 
@@ -270,25 +270,28 @@ async def backlog_view(
             title = getattr(issue, "title", "Untitled")
             issue_id = getattr(issue, "id", "")
             points = getattr(issue, "story_points", "-")
+            sprint_id = getattr(issue, "sprint_id", None)
             issues_html += f"""
             <tr class="draggable" draggable="true" data-issue-id="{issue_id}">
+                <td style="text-align: center; cursor: move; user-select: none;">⋮</td>
                 <td>{issue_id}</td>
                 <td>{title}</td>
                 <td><span class="badge">{status}</span></td>
                 <td>{issue_type}</td>
                 <td>{points}</td>
-                <td>
+                <td style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                     <button hx-get="/backlog/{project_id}/estimate?issue_id={issue_id}"
                             hx-target="#modal-content"
                             class="secondary"
                             style="padding: 0.35rem 0.75rem; font-size: 0.875rem;">
-                        Estimate
+                        Est
                     </button>
+                    {'' if sprint_id else f'<button hx-get="/backlog/{project_id}/sprint-select?issue_id={issue_id}" hx-target="#modal-content" class="secondary" style="padding: 0.35rem 0.75rem; font-size: 0.875rem;">+Sprint</button>'}
                 </td>
             </tr>
             """
     else:
-        issues_html = '<tr><td colspan="6" style="text-align:center; color: #999;">No issues in backlog</td></tr>'
+        issues_html = '<tr><td colspan="7" style="text-align:center; color: #999;">No issues in backlog</td></tr>'
 
     content = f"""
     <div class="header-actions">
@@ -303,6 +306,7 @@ async def backlog_view(
     <table>
         <thead>
             <tr>
+                <th style="width: 40px;">⋮</th>
                 <th>ID</th>
                 <th>Title</th>
                 <th>Status</th>
@@ -319,7 +323,7 @@ async def backlog_view(
     <div id="modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Estimation</h2>
+                <h2 id="modal-title">Form</h2>
                 <span class="close-btn" onclick="document.getElementById('modal').classList.remove('show')">&times;</span>
             </div>
             <div id="modal-content"></div>
@@ -330,6 +334,62 @@ async def backlog_view(
         document.getElementById('modal').addEventListener('htmx:load', function() {{
             document.getElementById('modal').classList.add('show');
         }});
+
+        // Drag and drop for reordering
+        let draggedRow = null;
+        const backlogTable = document.getElementById('backlog-table');
+
+        if (backlogTable) {{
+            const rows = backlogTable.querySelectorAll('tr.draggable');
+
+            rows.forEach(row => {{
+                row.addEventListener('dragstart', (e) => {{
+                    draggedRow = row;
+                    row.classList.add('dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                }});
+
+                row.addEventListener('dragend', () => {{
+                    row.classList.remove('dragging');
+                    draggedRow = null;
+                }});
+
+                row.addEventListener('dragover', (e) => {{
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (row !== draggedRow) {{
+                        row.style.borderTop = '2px solid #2563eb';
+                    }}
+                }});
+
+                row.addEventListener('dragleave', () => {{
+                    row.style.borderTop = '';
+                }});
+
+                row.addEventListener('drop', async (e) => {{
+                    e.preventDefault();
+                    row.style.borderTop = '';
+
+                    if (row !== draggedRow && draggedRow) {{
+                        // Reorder: move draggedRow before row
+                        backlogTable.insertBefore(draggedRow, row);
+
+                        // Send reorder request
+                        const issueIds = Array.from(backlogTable.querySelectorAll('tr.draggable'))
+                            .map(r => r.dataset.issueId);
+
+                        await fetch('/backlog/{project_id}/bulk-reorder', {{
+                            method: 'POST',
+                            headers: {{'Content-Type': 'application/json'}},
+                            body: JSON.stringify({{
+                                project_id: '{project_id}',
+                                ordered_ids: issueIds
+                            }})
+                        }});
+                    }}
+                }});
+            }});
+        }}
     </script>
     """
     return HTMLResponse(BASE_HTML.format(title="Backlog - AgileAI", content=content))
@@ -388,7 +448,6 @@ async def save_estimate(
 ):
     """Save estimation for an issue."""
     from sqlalchemy import update
-    from issues import Issue
 
     try:
         stmt = update(Issue).where(Issue.id == issue_id).values(
@@ -470,6 +529,104 @@ async def prioritize_view(
     </table>
     """
     return HTMLResponse(BASE_HTML.format(title="Prioritized Backlog - AgileAI", content=content))
+
+
+@router.post("/backlog/{project_id}/bulk-reorder")
+async def bulk_reorder(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk reorder backlog issues."""
+    from sqlalchemy import update
+
+    try:
+        body = await request.json()
+        ordered_ids = body.get("ordered_ids", [])
+
+        for order, issue_id in enumerate(ordered_ids):
+            stmt = update(Issue).where(Issue.id == issue_id).values(
+                backlog_order=order
+            )
+            await db.execute(stmt)
+
+        await db.commit()
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}, 400
+
+
+@router.get("/backlog/{project_id}/sprint-select", response_class=HTMLResponse)
+async def sprint_select_form(
+    project_id: str,
+    issue_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Show sprint selection form."""
+    from sqlalchemy import select
+
+    try:
+        # Get available sprints for this project
+        # For now, just return a simple form with common sprint names
+        sprint_options = """
+        <option value="">Select a sprint...</option>
+        <option value="sprint-1">Sprint 1</option>
+        <option value="sprint-2">Sprint 2</option>
+        <option value="sprint-3">Sprint 3</option>
+        """
+
+        content = f"""
+        <form hx-post="/backlog/{project_id}/add-to-sprint"
+              hx-target="#modal-content"
+              style="display: flex; flex-direction: column; gap: 1rem;">
+            <input type="hidden" name="issue_id" value="{issue_id}">
+
+            <div class="form-group">
+                <label for="sprint_id">Sprint:</label>
+                <select name="sprint_id" id="sprint_id" required>
+                    {sprint_options}
+                </select>
+            </div>
+
+            <div style="display: flex; gap: 1rem;">
+                <button type="submit">Add to Sprint</button>
+                <button type="button" class="secondary" onclick="document.getElementById('modal').classList.remove('show')">Cancel</button>
+            </div>
+        </form>
+        """
+        return HTMLResponse(content)
+    except Exception as e:
+        return HTMLResponse(f'<div class="error">Error: {str(e)}</div>', status_code=400)
+
+
+@router.post("/backlog/{project_id}/add-to-sprint", response_class=HTMLResponse)
+async def add_to_sprint(
+    project_id: str,
+    issue_id: str = Form(...),
+    sprint_id: str = Form(...),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Add issue to sprint."""
+    from sqlalchemy import update
+
+    try:
+        stmt = update(Issue).where(Issue.id == issue_id).values(
+            sprint_id=sprint_id
+        )
+        await db.execute(stmt)
+        await db.commit()
+
+        return HTMLResponse(
+            f'<div class="success">✓ Issue added to {sprint_id}! <a href="/backlog/{project_id}" hx-boost="true">Reload</a></div>',
+            status_code=200
+        )
+    except Exception as e:
+        return HTMLResponse(
+            f'<div class="error">✗ Error: {str(e)}</div>',
+            status_code=400
+        )
 
 
 @router.get("/logout", response_class=HTMLResponse)
