@@ -16,7 +16,8 @@ if str(_root) not in sys.path:
 
 from database import engine
 from __init__ import Base
-from agileai.api.routers import backlog
+from agileai.api.routers import auth, backlog
+from agileai.web import router as web_router
 
 
 # ---------------------------------------------------------------------------
@@ -57,12 +58,23 @@ async def health_check():
 
 
 # ---------------------------------------------------------------------------
+# Static files and web UI
+# ---------------------------------------------------------------------------
+from fastapi.staticfiles import StaticFiles
+static_dir = Path(__file__).parent.parent / "web" / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# ---------------------------------------------------------------------------
 # API v1 routes
 # ---------------------------------------------------------------------------
-app.include_router(
-    backlog.router,
-    prefix="/api/v1",
-)
+app.include_router(auth.router, prefix="/api/v1")
+app.include_router(backlog.router, prefix="/api/v1")
+
+# ---------------------------------------------------------------------------
+# Web UI routes
+# ---------------------------------------------------------------------------
+app.include_router(web_router)
 
 
 # ---------------------------------------------------------------------------

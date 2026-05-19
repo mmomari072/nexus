@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Backlog - {{ project_id }} - AgileAI{% endblock %}
+
+{% block content %}
+<div class="backlog-container">
+    <div class="backlog-header">
+        <h2>Backlog - {{ project_id }}</h2>
+        <div class="backlog-actions">
+            <button class="btn btn-small" hx-get="/backlog/{{ project_id }}/prioritize" hx-target="#backlog-content" hx-swap="outerHTML">
+                📊 Prioritize
+            </button>
+        </div>
+    </div>
+
+    <div id="backlog-content" class="backlog-content">
+        {% if issues %}
+            <table class="issues-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Title</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Difficulty</th>
+                        <th>Importance</th>
+                        <th>Points</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody hx-target="closest tr" hx-swap="outerHTML swap:1s">
+                    {% for issue in issues %}
+                        <tr class="issue-row" id="issue-{{ issue.id }}">
+                            <td class="col-id">{{ issue.id[:8] }}</td>
+                            <td class="col-title">
+                                <a href="#" title="{{ issue.title }}">
+                                    {{ issue.title[:50] }}{% if issue.title|length > 50 %}...{% endif %}
+                                </a>
+                            </td>
+                            <td class="col-type">
+                                <span class="badge badge-{{ issue.issue_type }}">{{ issue.issue_type }}</span>
+                            </td>
+                            <td class="col-status">
+                                <span class="badge badge-{{ issue.status }}">{{ issue.status }}</span>
+                            </td>
+                            <td class="col-difficulty">{{ issue.difficulty or '-' }}</td>
+                            <td class="col-importance">{{ issue.importance or '-' }}</td>
+                            <td class="col-points">{{ issue.story_points or '-' }}</td>
+                            <td class="col-actions">
+                                <button class="btn btn-tiny"
+                                    hx-get="/backlog/{{ project_id }}/estimate?issue_id={{ issue.id }}"
+                                    hx-target="body"
+                                    hx-swap="beforeend"
+                                    title="Estimate">
+                                    ⚡
+                                </button>
+                                <button class="btn btn-tiny" title="Reorder">↕️</button>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="empty-state">
+                <p>No issues in backlog</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
