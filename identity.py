@@ -109,7 +109,7 @@ class Agent(Base, TimestampMixin):
     # - agent_logs: AgentLog
     # - feedback_received: AgentFeedback
     # - sent_messages: AgentMessage
-    model: Mapped["AIModel"] = relationship("AIModel")
+    model: Mapped["AIModel"] = relationship("AIModel", overlaps="agents")
 
     def __repr__(self) -> str:
         return f"<Agent {self.name} [{self.role}]>"
