@@ -16,7 +16,7 @@ if str(_root) not in sys.path:
 
 from __init__ import Issue, IssueLink, SprintIssue
 
-from .domain import DORCheckResult, EstimationInput, EstimationResult, PriorityScore
+from .domain import DORCheckResult, Difficulty, EstimationInput, EstimationResult, Importance, PriorityScore
 from .estimation import EstimationService
 from .exceptions import IssueNotFoundError
 from .prioritization import PrioritizationService
@@ -86,8 +86,8 @@ class BacklogService:
 
         inp = EstimationInput(
             issue_id=issue_id,
-            difficulty=issue.difficulty,  # type: ignore
-            importance=issue.importance,  # type: ignore
+            difficulty=Difficulty(issue.difficulty),
+            importance=Importance(issue.importance),
             child_count=child_count,
             has_external_dependencies=has_deps,
             issue_type=issue.issue_type,

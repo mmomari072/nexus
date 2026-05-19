@@ -1,8 +1,13 @@
 """Tests for backlog services and API endpoints."""
 
 import pytest
+import sys
+from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+
+# Add repository root to path so we can import from __init__
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from __init__ import (
     Base,
@@ -58,8 +63,10 @@ async def user(db_session: AsyncSession) -> User:
     """Create a test user."""
     user = User(
         id="user-1",
+        name="Test User",
         username="testuser",
         email="test@example.com",
+        password_hash="hashed_password",
     )
     db_session.add(user)
     await db_session.commit()

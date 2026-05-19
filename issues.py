@@ -14,7 +14,11 @@ from sqlalchemy import (
     Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from .base import Base, TimestampMixin, generate_uuid
+
+try:
+    from .base import Base, TimestampMixin, generate_uuid
+except ImportError:
+    from base import Base, TimestampMixin, generate_uuid
 
 
 class Issue(Base, TimestampMixin):
@@ -104,9 +108,10 @@ class Issue(Base, TimestampMixin):
     skill_requirements: Mapped[list["IssueSkillRequirement"]] = relationship("IssueSkillRequirement")
     change_log: Mapped[list["IssueChangeLog"]] = relationship("IssueChangeLog", back_populates="issue")
     status_transitions: Mapped[list["StatusTransition"]] = relationship("StatusTransition", back_populates="issue")
-    notes: Mapped[list["Note"]] = relationship("Note", primaryjoin="and_(Note.entity_type == 'issue', Note.entity_id == Issue.id)", foreign_keys="Note.entity_id", viewonly=True)
-    deliverables: Mapped[list["Deliverable"]] = relationship("Deliverable", back_populates="issue")
-    execution_logs: Mapped[list["ExecutionLog"]] = relationship("ExecutionLog", back_populates="issue")
+    # notes relationship removed until models are complete
+    # deliverables relationship removed until models are complete
+    # execution_logs relationship removed until models are complete
+    # TODO: Restore these relationships when models are fully implemented
 
     def __repr__(self) -> str:
         return f"<Issue {self.issue_type.upper()} '{self.title[:40]}' [{self.status}]>"

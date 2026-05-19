@@ -15,7 +15,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .base import Base, TimestampMixin, generate_uuid
+try:
+    from .base import Base, TimestampMixin, generate_uuid
+except ImportError:
+    from base import Base, TimestampMixin, generate_uuid
 
 
 class AIModel(Base, TimestampMixin):
@@ -50,14 +53,12 @@ class AIModel(Base, TimestampMixin):
     max_tokens_output: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Relationships
-    agents: Mapped[list["Agent"]] = relationship("Agent", back_populates="model")
-    token_usages: Mapped[list["AgentTokenUsage"]] = relationship(
-        "AgentTokenUsage", back_populates="model", foreign_keys="AgentTokenUsage.model_id"
-    )
-    token_budgets: Mapped[list["AgentTokenBudget"]] = relationship(
-        "AgentTokenBudget", back_populates="model", foreign_keys="AgentTokenBudget.model_id"
-    )
+    # Relationships (simplified for stub model compatibility)
+    # Only include relationships with complete model definitions
+    agents: Mapped[list["Agent"]] = relationship("Agent")
+    # TODO: Restore when stub models are completed:
+    # - token_usages: AgentTokenUsage
+    # - token_budgets: AgentTokenBudget
 
     def __repr__(self) -> str:
         return f"<AIModel {self.provider}/{self.model_name}>"
@@ -97,34 +98,18 @@ class Agent(Base, TimestampMixin):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     avatar_emoji: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
 
-    # Relationships
-    model: Mapped["AIModel"] = relationship("AIModel", back_populates="agents")
-    skills: Mapped[list["AgentSkill"]] = relationship(
-        "AgentSkill", back_populates="agent"
-    )
-    availability: Mapped[Optional["AgentAvailability"]] = relationship(
-        "AgentAvailability", back_populates="agent", uselist=False
-    )
-    token_usages: Mapped[list["AgentTokenUsage"]] = relationship(
-        "AgentTokenUsage", back_populates="agent"
-    )
-    token_budgets: Mapped[list["AgentTokenBudget"]] = relationship(
-        "AgentTokenBudget", back_populates="agent",
-        foreign_keys="AgentTokenBudget.agent_id"
-    )
-    execution_logs: Mapped[list["ExecutionLog"]] = relationship(
-        "ExecutionLog", back_populates="agent"
-    )
-    agent_logs: Mapped[list["AgentLog"]] = relationship(
-        "AgentLog", back_populates="agent"
-    )
-    feedback_received: Mapped[list["AgentFeedback"]] = relationship(
-        "AgentFeedback", back_populates="agent"
-    )
-    sent_messages: Mapped[list["AgentMessage"]] = relationship(
-        "AgentMessage", back_populates="from_agent",
-        foreign_keys="AgentMessage.from_agent_id"
-    )
+    # Relationships (simplified for stub model compatibility)
+    # Only include relationships that have complete model definitions
+    # TODO: Restore when models are fully implemented:
+    # - skills: AgentSkill
+    # - availability: AgentAvailability
+    # - token_usages: AgentTokenUsage
+    # - token_budgets: AgentTokenBudget
+    # - execution_logs: ExecutionLog
+    # - agent_logs: AgentLog
+    # - feedback_received: AgentFeedback
+    # - sent_messages: AgentMessage
+    model: Mapped["AIModel"] = relationship("AIModel")
 
     def __repr__(self) -> str:
         return f"<Agent {self.name} [{self.role}]>"
@@ -151,18 +136,8 @@ class User(Base, TimestampMixin):
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Relationships
-    api_keys: Mapped[list["APIKey"]] = relationship(
-        "APIKey", back_populates="user",
-        primaryjoin="and_(APIKey.owner_id == User.id, APIKey.owner_type == 'user')",
-        foreign_keys="APIKey.owner_id",
-        viewonly=True,
-    )
-    contacts: Mapped[list["UserContact"]] = relationship(
-        "UserContact", back_populates="user"
-    )
-    telegram_commands: Mapped[list["TelegramCommand"]] = relationship(
-        "TelegramCommand", back_populates="user"
-    )
+    # api_keys and other relationships removed until stub models are complete
+    # TODO: Restore these relationships when models are fully implemented
 
     def __repr__(self) -> str:
         return f"<User {self.username}>"
@@ -195,7 +170,7 @@ class APIKey(Base):
 
     # Relationships
     user: Mapped[Optional["User"]] = relationship(
-        "User", back_populates="api_keys",
+        "User",
         primaryjoin="and_(APIKey.owner_id == User.id, APIKey.owner_type == 'user')",
         foreign_keys=[owner_id],
         viewonly=True,
