@@ -30,19 +30,24 @@ BASE_HTML = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{ font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; color: #334155; }}
         header {{ background: white; border-bottom: 1px solid #e2e8f0; padding: 1rem; }}
         main {{ max-width: 1200px; margin: 0 auto; padding: 2rem 1rem; }}
         h1 {{ color: #2563eb; margin-bottom: 1rem; }}
+        .header-actions {{ display: flex; gap: 1rem; justify-content: space-between; margin-bottom: 2rem; align-items: center; }}
         .container {{ max-width: 500px; margin: 2rem auto; }}
         form {{ display: flex; flex-direction: column; gap: 1rem; }}
-        input {{ padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 0.375rem; }}
+        input, select, textarea {{ padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 0.375rem; font-family: inherit; }}
         button {{ padding: 0.75rem 1.5rem; background: #2563eb; color: white; border: none;
                  border-radius: 0.375rem; font-weight: 500; cursor: pointer; }}
         button:hover {{ background: #1e40af; }}
+        button.secondary {{ background: #6b7280; }}
+        button.secondary:hover {{ background: #4b5563; }}
         .error {{ background: #fee2e2; color: #991b1b; padding: 0.75rem; border-radius: 0.375rem; }}
+        .success {{ background: #dcfce7; color: #166534; padding: 0.75rem; border-radius: 0.375rem; }}
         a {{ color: #2563eb; text-decoration: none; }}
         a:hover {{ text-decoration: underline; }}
         .actions {{ display: flex; gap: 1rem; margin: 2rem 0; }}
@@ -51,6 +56,22 @@ BASE_HTML = """
         th {{ background: #f1f5f9; font-weight: 600; }}
         .badge {{ display: inline-block; padding: 0.25rem 0.75rem; border-radius: 0.25rem;
                  font-size: 0.75rem; font-weight: 600; background: #dbeafe; color: #1e40af; }}
+        .modal {{ display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%;
+                 background-color: rgba(0,0,0,0.5); }}
+        .modal.show {{ display: block; }}
+        .modal-content {{ background-color: #fefefe; margin: 5% auto; padding: 2rem; border-radius: 0.5rem;
+                        width: 90%; max-width: 500px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+        .modal-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }}
+        .modal-header h2 {{ margin: 0; }}
+        .close-btn {{ font-size: 2rem; cursor: pointer; }}
+        .form-group {{ margin-bottom: 1rem; }}
+        .form-group label {{ display: block; margin-bottom: 0.5rem; font-weight: 500; }}
+        .score-display {{ padding: 1rem; background: #f1f5f9; border-radius: 0.375rem; margin-top: 1rem; }}
+        .spinner {{ display: inline-block; width: 1rem; height: 1rem; border: 2px solid #e2e8f0;
+                   border-top-color: #2563eb; border-radius: 50%; animation: spin 0.6s linear infinite; }}
+        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+        .draggable {{ cursor: move; }}
+        tr.dragging {{ opacity: 0.5; }}
     </style>
 </head>
 <body>
@@ -248,24 +269,36 @@ async def backlog_view(
             issue_type = getattr(issue, "type", "story")
             title = getattr(issue, "title", "Untitled")
             issue_id = getattr(issue, "id", "")
+            points = getattr(issue, "story_points", "-")
             issues_html += f"""
-            <tr>
+            <tr class="draggable" draggable="true" data-issue-id="{issue_id}">
                 <td>{issue_id}</td>
                 <td>{title}</td>
                 <td><span class="badge">{status}</span></td>
                 <td>{issue_type}</td>
+                <td>{points}</td>
                 <td>
-                    <a href="/backlog/{project_id}/estimate?issue_id={issue_id}">Estimate</a>
+                    <button hx-get="/backlog/{project_id}/estimate?issue_id={issue_id}"
+                            hx-target="#modal-content"
+                            class="secondary"
+                            style="padding: 0.35rem 0.75rem; font-size: 0.875rem;">
+                        Estimate
+                    </button>
                 </td>
             </tr>
             """
     else:
-        issues_html = '<tr><td colspan="5" style="text-align:center; color: #999;">No issues in backlog</td></tr>'
+        issues_html = '<tr><td colspan="6" style="text-align:center; color: #999;">No issues in backlog</td></tr>'
 
     content = f"""
-    <div style="margin-bottom: 2rem;">
-        <h1>Backlog: {project_id}</h1>
-        <a href="/logout" style="color: #dc2626;">Logout</a>
+    <div class="header-actions">
+        <div>
+            <h1>Backlog: {project_id}</h1>
+        </div>
+        <div style="display: flex; gap: 1rem;">
+            <a href="/backlog/{project_id}/prioritize" style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border-radius: 0.375rem;">📊 Prioritized View</a>
+            <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
+        </div>
     </div>
     <table>
         <thead>
@@ -274,7 +307,161 @@ async def backlog_view(
                 <th>Title</th>
                 <th>Status</th>
                 <th>Type</th>
+                <th>Points</th>
                 <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="backlog-table">
+            {issues_html}
+        </tbody>
+    </table>
+
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Estimation</h2>
+                <span class="close-btn" onclick="document.getElementById('modal').classList.remove('show')">&times;</span>
+            </div>
+            <div id="modal-content"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('modal').addEventListener('htmx:load', function() {{
+            document.getElementById('modal').classList.add('show');
+        }});
+    </script>
+    """
+    return HTMLResponse(BASE_HTML.format(title="Backlog - AgileAI", content=content))
+
+
+@router.get("/backlog/{project_id}/estimate", response_class=HTMLResponse)
+async def estimate_form(
+    project_id: str,
+    issue_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Show estimation form for an issue."""
+    content = f"""
+    <form hx-post="/backlog/{project_id}/estimate"
+          hx-target="#modal-content"
+          style="display: flex; flex-direction: column; gap: 1rem;">
+        <input type="hidden" name="issue_id" value="{issue_id}">
+
+        <div class="form-group">
+            <label for="story_points">Story Points:</label>
+            <select name="story_points" id="story_points" required>
+                <option value="">Select points...</option>
+                <option value="1">1 - Trivial</option>
+                <option value="2">2 - Very Small</option>
+                <option value="3">3 - Small</option>
+                <option value="5">5 - Medium</option>
+                <option value="8">8 - Large</option>
+                <option value="13">13 - Very Large</option>
+                <option value="21">21 - Huge</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="rationale">Rationale:</label>
+            <textarea name="rationale" id="rationale" rows="4" placeholder="Why this estimate?" required></textarea>
+        </div>
+
+        <div style="display: flex; gap: 1rem;">
+            <button type="submit">Save Estimate</button>
+            <button type="button" class="secondary" onclick="document.getElementById('modal').classList.remove('show')">Cancel</button>
+        </div>
+    </form>
+    """
+    return HTMLResponse(content)
+
+
+@router.post("/backlog/{project_id}/estimate", response_class=HTMLResponse)
+async def save_estimate(
+    project_id: str,
+    issue_id: str = Form(...),
+    story_points: int = Form(...),
+    rationale: str = Form(...),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Save estimation for an issue."""
+    from sqlalchemy import update
+    from issues import Issue
+
+    try:
+        stmt = update(Issue).where(Issue.id == issue_id).values(
+            story_points=story_points
+        )
+        await db.execute(stmt)
+        await db.commit()
+
+        return HTMLResponse(
+            '<div class="success">✓ Estimate saved successfully!</div>',
+            status_code=200
+        )
+    except Exception as e:
+        return HTMLResponse(
+            f'<div class="error">✗ Error saving estimate: {str(e)}</div>',
+            status_code=400
+        )
+
+
+@router.get("/backlog/{project_id}/prioritize", response_class=HTMLResponse)
+async def prioritize_view(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Display prioritized backlog view."""
+    from agileai.services.backlog import BacklogService
+
+    auth_token = request.cookies.get("auth_token")
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=302)
+
+    svc = BacklogService(db)
+    try:
+        ranked = await svc.prioritize_backlog(project_id)
+    except Exception:
+        ranked = []
+
+    issues_html = ""
+    if ranked:
+        for i, issue in enumerate(ranked, 1):
+            score = getattr(issue, "_priority_score", None)
+            score_val = score.score if score else 0
+            title = getattr(issue, "title", "Untitled")
+            issue_id = getattr(issue, "id", "")
+            issues_html += f"""
+            <tr>
+                <td>{i}</td>
+                <td>{issue_id}</td>
+                <td>{title}</td>
+                <td style="text-align: right;">{score_val:.1f}</td>
+            </tr>
+            """
+    else:
+        issues_html = '<tr><td colspan="4" style="text-align:center; color: #999;">No ranked issues</td></tr>'
+
+    content = f"""
+    <div class="header-actions">
+        <div>
+            <h1>Prioritized Backlog: {project_id}</h1>
+        </div>
+        <div style="display: flex; gap: 1rem;">
+            <a href="/backlog/{project_id}" style="padding: 0.5rem 1rem; background: #3b82f6; color: white; border-radius: 0.375rem;">📋 Back to Backlog</a>
+            <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
+        </div>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>ID</th>
+                <th>Title</th>
+                <th>Score</th>
             </tr>
         </thead>
         <tbody>
@@ -282,7 +469,7 @@ async def backlog_view(
         </tbody>
     </table>
     """
-    return HTMLResponse(BASE_HTML.format(title="Backlog - AgileAI", content=content))
+    return HTMLResponse(BASE_HTML.format(title="Prioritized Backlog - AgileAI", content=content))
 
 
 @router.get("/logout", response_class=HTMLResponse)
