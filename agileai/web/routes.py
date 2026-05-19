@@ -354,13 +354,24 @@ async def backlog_view(
             issue_id = getattr(issue, "id", "")
             points = getattr(issue, "story_points", "-")
             sprint_id = getattr(issue, "sprint_id", None)
+            status_options = """
+            <select style="padding: 0.35rem 0.75rem; font-size: 0.875rem; border: 1px solid #e2e8f0; border-radius: 0.25rem;"
+                    onchange="fetch('/project/{project_id}/backlog/update-status', {{method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify({{issue_id: '{issue_id}', status: this.value}})}})">
+                <option value="backlog" {'selected' if status == 'backlog' else ''}>📋 Backlog</option>
+                <option value="ready" {'selected' if status == 'ready' else ''}>✓ Ready</option>
+                <option value="in_progress" {'selected' if status == 'in_progress' else ''}>🔄 In Progress</option>
+                <option value="in_review" {'selected' if status == 'in_review' else ''}>👀 In Review</option>
+                <option value="done" {'selected' if status == 'done' else ''}>✅ Done</option>
+            </select>
+            """
+
             issues_html += f"""
             <tr class="draggable" draggable="true" data-issue-id="{issue_id}">
                 <td style="text-align: center; cursor: move; user-select: none;">⋮</td>
-                <td>{issue_id}</td>
-                <td>{title}</td>
-                <td><span class="badge">{status}</span></td>
-                <td>{issue_type}</td>
+                <td><a href="/project/{project_id}/issue/{issue_id}" style="color: #2563eb; font-weight: 500;">{issue_id}</a></td>
+                <td><a href="/project/{project_id}/issue/{issue_id}" style="color: #334155; text-decoration: none;">{title}</a></td>
+                <td>{status_options}</td>
+                <td><span class="badge">{issue_type}</span></td>
                 <td>{points}</td>
                 <td style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                     <button hx-get="/project/{project_id}/backlog/estimate?issue_id={issue_id}"
@@ -383,7 +394,13 @@ async def backlog_view(
         <div>
             <h1>{project_id}</h1>
         </div>
-        <div>
+        <div style="display: flex; gap: 1rem;">
+            <button hx-get="/project/{project_id}/backlog/create-issue"
+                    hx-target="#modal-content"
+                    style="padding: 0.5rem 1rem; background: #10b981; color: white; border: none;
+                           border-radius: 0.375rem; cursor: pointer; font-weight: 500;">
+                ➕ New Issue
+            </button>
             <a href="/projects" style="color: #2563eb; margin-right: 1rem;">← Back to Projects</a>
             <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
         </div>
@@ -733,6 +750,238 @@ async def add_to_sprint(
             f'<div class="error">✗ Error: {str(e)}</div>',
             status_code=400
         )
+
+
+@router.get("/project/{project_id}/backlog/create-issue", response_class=HTMLResponse)
+async def create_issue_form(
+    project_id: str,
+    request: Request,
+):
+    """Show create issue form."""
+    content = f"""
+    <form hx-post="/project/{project_id}/backlog/create-issue"
+          hx-target="#backlog-table"
+          style="display: flex; flex-direction: column; gap: 1rem;">
+
+        <div class="form-group">
+            <label for="title">Title:</label>
+            <input type="text" name="title" id="title" placeholder="Issue title" required>
+        </div>
+
+        <div class="form-group">
+            <label for="description">Description:</label>
+            <textarea name="description" id="description" rows="4" placeholder="Issue description"></textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="issue_type">Type:</label>
+            <select name="issue_type" id="issue_type">
+                <option value="task">Task</option>
+                <option value="story">Story</option>
+                <option value="bug">Bug</option>
+                <option value="feature">Feature</option>
+                <option value="spike">Spike</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="priority">Priority:</label>
+            <select name="priority" id="priority">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+            </select>
+        </div>
+
+        <div style="display: flex; gap: 1rem;">
+            <button type="submit">Create Issue</button>
+            <button type="button" class="secondary" onclick="document.getElementById('modal').classList.remove('show')">Cancel</button>
+        </div>
+    </form>
+    """
+    return HTMLResponse(content)
+
+
+@router.post("/project/{project_id}/backlog/create-issue", response_class=HTMLResponse)
+async def save_new_issue(
+    project_id: str,
+    title: str = Form(...),
+    description: str = Form(default=""),
+    issue_type: str = Form(default="task"),
+    priority: str = Form(default="medium"),
+    request: Request = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create new issue."""
+    from sqlalchemy import func
+    import uuid
+
+    try:
+        # Get user from JWT
+        auth_token = request.cookies.get("auth_token")
+        if not auth_token:
+            return HTMLResponse(
+                '<div class="error">✗ Authentication required</div>',
+                status_code=401
+            )
+
+        # Decode JWT to get user ID
+        from jose import jwt
+        try:
+            payload = jwt.decode(auth_token, "your-secret-key-change-in-production", algorithms=["HS256"])
+            user_id = payload.get("sub")
+        except:
+            user_id = str(uuid.uuid4())  # Fallback user ID
+
+        # Generate issue ID
+        issue_number = abs(hash(title)) % 10000
+        issue_id = f"{project_id.upper()}-{issue_number}"
+
+        new_issue = Issue(
+            id=issue_id,
+            project_id=project_id,
+            title=title,
+            description=description,
+            issue_type=issue_type,
+            priority=priority,
+            status="backlog"
+        )
+        db.add(new_issue)
+        await db.commit()
+        await db.refresh(new_issue)
+
+        return HTMLResponse(
+            f'<div class="success">✓ Issue {issue_id} created! <a href="/project/{project_id}/backlog" hx-boost="true">Reload</a></div>',
+            status_code=200
+        )
+    except Exception as e:
+        return HTMLResponse(
+            f'<div class="error">✗ Error creating issue: {str(e)}</div>',
+            status_code=400
+        )
+
+
+@router.post("/project/{project_id}/backlog/update-status")
+async def update_issue_status(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update issue status."""
+    from sqlalchemy import update
+    import json
+
+    try:
+        body = await request.json()
+        issue_id = body.get("issue_id")
+        status = body.get("status")
+
+        stmt = update(Issue).where(Issue.id == issue_id).values(status=status)
+        await db.execute(stmt)
+        await db.commit()
+
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}, 400
+
+
+@router.get("/project/{project_id}/issue/{issue_id}", response_class=HTMLResponse)
+async def issue_detail_view(
+    project_id: str,
+    issue_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Display issue detail view."""
+    from sqlalchemy import select
+
+    auth_token = request.cookies.get("auth_token")
+    if not auth_token:
+        return RedirectResponse(url="/login", status_code=302)
+
+    try:
+        result = await db.execute(select(Issue).where(Issue.id == issue_id))
+        issue = result.scalar_one_or_none()
+
+        if not issue:
+            return HTMLResponse('<div class="error">Issue not found</div>', status_code=404)
+
+        title = getattr(issue, "title", "Untitled")
+        description = getattr(issue, "description", "")
+        status = getattr(issue, "status", "backlog")
+        issue_type = getattr(issue, "issue_type", "task")
+        priority = getattr(issue, "priority", "medium")
+        points = getattr(issue, "story_points", "-")
+        created_at = getattr(issue, "created_at", "")
+
+        content = f"""
+        <div class="header-actions">
+            <div>
+                <h1>{issue_id}</h1>
+            </div>
+            <div>
+                <a href="/project/{project_id}/backlog" style="color: #2563eb; margin-right: 1rem;">← Back to Backlog</a>
+                <a href="/logout" style="color: #dc2626;">🚪 Logout</a>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 2rem;">
+            <div>
+                <h2>{title}</h2>
+                <div style="margin: 1.5rem 0; padding: 1rem; background: #f8fafc; border-radius: 0.5rem;">
+                    <h3>Description</h3>
+                    <p>{description if description else '<em style="color: #999;">No description</em>'}</p>
+                </div>
+
+                <div style="margin: 1.5rem 0;">
+                    <h3>Activity</h3>
+                    <p style="color: #999;">Created on {created_at}</p>
+                </div>
+            </div>
+
+            <div style="background: white; padding: 1.5rem; border: 1px solid #e2e8f0; border-radius: 0.5rem;">
+                <h3>Details</h3>
+
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Status</label>
+                    <select style="width: 100%; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 0.375rem;"
+                            onchange="fetch('/project/{project_id}/backlog/update-status', {{method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify({{issue_id: '{issue_id}', status: this.value}})}})">
+                        <option value="backlog" {'selected' if status == 'backlog' else ''}>📋 Backlog</option>
+                        <option value="ready" {'selected' if status == 'ready' else ''}>✓ Ready</option>
+                        <option value="in_progress" {'selected' if status == 'in_progress' else ''}>🔄 In Progress</option>
+                        <option value="in_review" {'selected' if status == 'in_review' else ''}>👀 In Review</option>
+                        <option value="done" {'selected' if status == 'done' else ''}>✅ Done</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Type</label>
+                    <span class="badge">{issue_type}</span>
+                </div>
+
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Priority</label>
+                    <span class="badge">{priority}</span>
+                </div>
+
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="font-weight: 600; display: block; margin-bottom: 0.5rem;">Story Points</label>
+                    <p>{points}</p>
+                </div>
+
+                <button hx-get="/project/{project_id}/backlog/estimate?issue_id={issue_id}"
+                        hx-target="#modal-content"
+                        style="width: 100%; padding: 0.75rem; background: #3b82f6; color: white; border: none;
+                               border-radius: 0.375rem; cursor: pointer; font-weight: 500;">
+                    Estimate Story Points
+                </button>
+            </div>
+        </div>
+        """
+        return HTMLResponse(BASE_HTML.format(title=f"{issue_id} - AgileAI", content=content))
+    except Exception as e:
+        return HTMLResponse(f'<div class="error">Error: {str(e)}</div>', status_code=500)
 
 
 @router.get("/project/{project_id}/sprints", response_class=HTMLResponse)
