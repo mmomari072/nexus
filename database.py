@@ -19,8 +19,12 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from agileai.models import Base
-from agileai.models.base import TimestampMixin
+try:
+    # Try package imports first
+    from agileai.models import Base, TimestampMixin
+except ImportError:
+    # Fallback to root imports
+    from __init__ import Base, TimestampMixin
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,8 @@
 """Re-export models from root package for consistency."""
 
 try:
-    # Try relative import from parent package
-    from ... import (  # noqa: F401
+    # Try absolute import from root package first
+    from __init__ import (  # noqa: F401
         Base,
         TimestampMixin,
         ActionTimestampMixin,
