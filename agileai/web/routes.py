@@ -16,9 +16,12 @@ from agileai.api.dependencies import get_db, create_access_token
 from agileai.api.routers.auth import hash_password, verify_password
 
 try:
-    from __init__ import User, Issue
+    from __init__ import (
+        User, Issue, Sprint, SprintIssue, SprintGoal, SprintCapacity,
+        Ceremony, StandupRecord, AIModel, Agent,
+    )
 except ImportError:
-    from agileai.models import User, Issue
+    from agileai.models import User, Issue  # type: ignore
 
 router = APIRouter(tags=["web"])
 
@@ -287,8 +290,11 @@ APP_HTML = """<!DOCTYPE html>
       <a href="#" class="nav-item">
         <span class="icon">◉</span> My Issues
       </a>
-      <a href="#" class="nav-item">
-        <span class="icon">◎</span> Team
+      <a href="/agents" class="nav-item {nav_agents}">
+        <span class="icon">🤖</span> Agents
+      </a>
+      <a href="/models" class="nav-item {nav_models}">
+        <span class="icon">⚡</span> AI Models
       </a>
       <div class="sidebar-section" style="margin-top:0.75rem">System</div>
       <a href="/admin" class="nav-item {nav_admin}">
@@ -457,8 +463,10 @@ def render_app(title: str, content: str, project_id: str = "", active_tab: str =
     initials = "".join(w[0].upper() for w in user_name.split()[:2]) or "U"
 
     sidebar_projects = ""
-    nav_projects = "active" if not project_id and active_tab != "admin" else ""
+    nav_projects = "active" if not project_id and active_tab not in ("admin", "agents", "models") else ""
     nav_admin = "active" if active_tab == "admin" else ""
+    nav_agents = "active" if active_tab == "agents" else ""
+    nav_models = "active" if active_tab == "models" else ""
     for p in PROJECTS:
         active = "active" if p["id"] == project_id else ""
         sidebar_projects += f'<a href="/project/{p["id"]}/backlog" class="nav-item nav-project {active}">{p["name"]}</a>\n'
@@ -478,6 +486,8 @@ def render_app(title: str, content: str, project_id: str = "", active_tab: str =
         sidebar_projects=sidebar_projects,
         nav_projects=nav_projects,
         nav_admin=nav_admin,
+        nav_agents=nav_agents,
+        nav_models=nav_models,
         breadcrumb=breadcrumb,
         user_initials=initials,
         user_name=user_name,
@@ -1094,50 +1104,415 @@ async def prioritize_view(project_id: str, request: Request, db: AsyncSession = 
 
 
 # ---------------------------------------------------------------------------
-# Sprints tab
+# Sprints tab — real DB-backed
 # ---------------------------------------------------------------------------
+_SPRINT_STATUS_COLORS = {
+    "planned": ("#3b82f6", "#dbeafe", "Planned"),
+    "active":  ("#10b981", "#d1fae5", "Active"),
+    "completed": ("#94a3b8", "#f1f5f9", "Completed"),
+    "cancelled": ("#ef4444", "#fee2e2", "Cancelled"),
+}
+
+
 @router.get("/project/{project_id}/sprints", response_class=HTMLResponse)
 async def sprints_view(project_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     if not request.cookies.get("auth_token"):
         return RedirectResponse(url="/login", status_code=302)
 
+    user_name = get_user_from_cookie(request) or "User"
     proj_name = next((p["name"] for p in PROJECTS if p["id"] == project_id), project_id)
 
-    sprints_data = [
-        {"id": "sprint-1", "name": "Sprint 1", "status": "active",    "total": 8, "done": 3, "goal": "Ship auth + backlog API"},
-        {"id": "sprint-2", "name": "Sprint 2", "status": "planned",   "total": 0, "done": 0, "goal": "Web UI & CLI"},
-        {"id": "sprint-3", "name": "Sprint 3", "status": "completed", "total": 12,"done": 12,"goal": "Infrastructure setup"},
-    ]
-
-    status_colors = {"active": "#10b981", "planned": "#3b82f6", "completed": "#94a3b8"}
-    status_labels = {"active": "Active", "planned": "Planned", "completed": "Completed"}
+    from sqlalchemy import select, func as sqlfunc
+    sprints = []
+    try:
+        res = await db.execute(
+            select(Sprint).where(Sprint.project_id == project_id).order_by(Sprint.created_at.desc())
+        )
+        sprints = list(res.scalars().all())
+    except Exception:
+        pass
 
     cards = ""
-    for sp in sprints_data:
-        pct = int(sp["done"] / sp["total"] * 100) if sp["total"] else 0
-        col = status_colors[sp["status"]]
-        lbl = status_labels[sp["status"]]
+    for sp in sprints:
+        st = sp.status or "planned"
+        col, bg, lbl = _SPRINT_STATUS_COLORS.get(st, ("#94a3b8", "#f1f5f9", st.title()))
+
+        # Count issues in sprint
+        total = done = 0
+        try:
+            r = await db.execute(
+                select(sqlfunc.count(Issue.id)).where(Issue.sprint_id == sp.id)
+            )
+            total = r.scalar() or 0
+            r2 = await db.execute(
+                select(sqlfunc.count(Issue.id)).where(
+                    Issue.sprint_id == sp.id, Issue.status == "done"
+                )
+            )
+            done = r2.scalar() or 0
+        except Exception:
+            pass
+
+        pct = int(done / total * 100) if total else 0
+        goal_text = sp.goal or "No goal set"
+        dates = ""
+        if sp.start_date or sp.end_date:
+            dates = f'<span style="font-size:0.75rem;color:var(--c-muted)">{sp.start_date or "?"} → {sp.end_date or "?"}</span>'
+
+        actions = ""
+        if st == "planned":
+            actions = f'<form method="post" action="/project/{project_id}/sprints/{sp.id}/start" style="display:inline"><button class="btn btn-success btn-sm" type="submit">▶ Start</button></form>'
+        elif st == "active":
+            actions = f'<form method="post" action="/project/{project_id}/sprints/{sp.id}/complete" style="display:inline"><button class="btn btn-ghost btn-sm" type="submit">✓ Complete</button></form>'
+
         cards += f"""
         <div class="sprint-card">
           <div class="sprint-card-head">
-            <div>
-              <h3 style="font-size:1rem;font-weight:700">{sp['name']}</h3>
-              <p style="font-size:0.8rem;color:var(--c-muted);margin-top:2px">{sp['goal']}</p>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.25rem">
+                <a href="/project/{project_id}/sprints/{sp.id}" style="font-size:1rem;font-weight:700;color:var(--c-text);text-decoration:none">{sp.name or sp.id}</a>
+                <span class="badge" style="background:{bg};color:{col}">{lbl}</span>
+                {dates}
+              </div>
+              <p style="font-size:0.8rem;color:var(--c-muted)">{goal_text}</p>
             </div>
-            <span class="badge" style="background:{col}20;color:{col}">{lbl}</span>
+            <div style="display:flex;gap:0.5rem;align-items:center;flex-shrink:0">
+              {actions}
+              <a href="/project/{project_id}/sprints/{sp.id}" class="btn btn-ghost btn-sm">Details →</a>
+            </div>
           </div>
-          <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem">
+          <div style="display:flex;align-items:center;gap:1rem;margin-top:0.75rem">
             <div class="progress-bar" style="flex:1"><div class="progress-fill" style="width:{pct}%;background:{col}"></div></div>
-            <span style="font-size:0.8rem;font-weight:600;color:{col}">{sp['done']}/{sp['total']}</span>
+            <span style="font-size:0.8rem;font-weight:600;color:{col}">{done}/{total} done · {pct}%</span>
           </div>
-          <div style="font-size:0.8rem;color:var(--c-muted)">{pct}% complete</div>
         </div>"""
+
+    if not sprints:
+        cards = """
+        <div class="empty-state">
+          <div class="empty-icon">🏃</div>
+          <h3>No sprints yet</h3>
+          <p>Create your first sprint to start planning.</p>
+        </div>"""
+
+    create_modal = f"""
+    <div id="sprint-modal" class="modal" onclick="if(event.target===this)document.getElementById('sprint-modal').classList.remove('show')">
+      <div class="modal-box">
+        <div class="modal-head">
+          <h3>Create Sprint</h3>
+          <button class="modal-close" onclick="document.getElementById('sprint-modal').classList.remove('show')">×</button>
+        </div>
+        <form method="post" action="/project/{project_id}/sprints/create">
+          <div class="modal-body">
+            <div class="form-group">
+              <label>Sprint Name <span style="color:#ef4444">*</span></label>
+              <input type="text" name="name" class="form-control" placeholder="Sprint 1" required>
+            </div>
+            <div class="form-group">
+              <label>Goal</label>
+              <textarea name="goal" class="form-control" rows="2" placeholder="What will the team achieve?"></textarea>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Start Date</label>
+                <input type="date" name="start_date" class="form-control">
+              </div>
+              <div class="form-group">
+                <label>End Date</label>
+                <input type="date" name="end_date" class="form-control">
+              </div>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('sprint-modal').classList.remove('show')">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create Sprint</button>
+          </div>
+        </form>
+      </div>
+    </div>"""
 
     content = f"""
     {project_tabs(project_id, "sprints")}
-    <div style="max-width:700px">{cards}</div>"""
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem">
+      <div>
+        <h2 style="font-size:1.15rem;font-weight:700">Sprints</h2>
+        <p style="color:var(--c-muted);font-size:0.85rem">{len(sprints)} sprint{'s' if len(sprints) != 1 else ''}</p>
+      </div>
+      <button class="btn btn-primary" onclick="document.getElementById('sprint-modal').classList.add('show')">+ New Sprint</button>
+    </div>
+    <div style="max-width:760px">{cards}</div>
+    {create_modal}"""
 
-    return HTMLResponse(render_app(f"{proj_name} · Sprints", content, project_id, "sprints", user_name="Demo User"))
+    return HTMLResponse(render_app(f"{proj_name} · Sprints", content, project_id, "sprints", user_name=user_name))
+
+
+@router.post("/project/{project_id}/sprints/create")
+async def sprint_create(
+    project_id: str, request: Request,
+    name: str = Form(...),
+    goal: str = Form(""),
+    start_date: str = Form(""),
+    end_date: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    if not request.cookies.get("auth_token"):
+        return RedirectResponse(url="/login", status_code=302)
+    sp = Sprint(
+        project_id=project_id,
+        name=name,
+        goal=goal or None,
+        start_date=start_date or None,
+        end_date=end_date or None,
+        status="planned",
+    )
+    db.add(sp)
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+    return RedirectResponse(url=f"/project/{project_id}/sprints", status_code=303)
+
+
+@router.post("/project/{project_id}/sprints/{sprint_id}/start")
+async def sprint_start(project_id: str, sprint_id: str, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import select, update
+    await db.execute(update(Sprint).where(Sprint.id == sprint_id).values(status="active"))
+    await db.commit()
+    return RedirectResponse(url=f"/project/{project_id}/sprints", status_code=303)
+
+
+@router.post("/project/{project_id}/sprints/{sprint_id}/complete")
+async def sprint_complete(project_id: str, sprint_id: str, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import update
+    await db.execute(update(Sprint).where(Sprint.id == sprint_id).values(status="completed"))
+    await db.commit()
+    return RedirectResponse(url=f"/project/{project_id}/sprints", status_code=303)
+
+
+@router.get("/project/{project_id}/sprints/{sprint_id}", response_class=HTMLResponse)
+async def sprint_detail(project_id: str, sprint_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.cookies.get("auth_token"):
+        return RedirectResponse(url="/login", status_code=302)
+
+    user_name = get_user_from_cookie(request) or "User"
+    proj_name = next((p["name"] for p in PROJECTS if p["id"] == project_id), project_id)
+
+    from sqlalchemy import select, func as sqlfunc
+    sp = None
+    try:
+        res = await db.execute(select(Sprint).where(Sprint.id == sprint_id))
+        sp = res.scalar_one_or_none()
+    except Exception:
+        pass
+
+    if not sp:
+        content = '<div class="alert alert-error">Sprint not found.</div>'
+        return HTMLResponse(render_app("Sprint Not Found", content, project_id, user_name=user_name), status_code=404)
+
+    # Issues in this sprint
+    issues = []
+    try:
+        res = await db.execute(select(Issue).where(Issue.sprint_id == sprint_id))
+        issues = list(res.scalars().all())
+    except Exception:
+        pass
+
+    # Ceremonies
+    ceremonies = []
+    try:
+        res = await db.execute(select(Ceremony).where(Ceremony.sprint_id == sprint_id).order_by(Ceremony.scheduled_at))
+        ceremonies = list(res.scalars().all())
+    except Exception:
+        pass
+
+    # Sprint goals
+    goals = []
+    try:
+        res = await db.execute(select(SprintGoal).where(SprintGoal.sprint_id == sprint_id).order_by(SprintGoal.order_index))
+        goals = list(res.scalars().all())
+    except Exception:
+        pass
+
+    total = len(issues)
+    done = sum(1 for i in issues if getattr(i, "status", "") == "done")
+    pct = int(done / total * 100) if total else 0
+    st = sp.status or "planned"
+    col, bg, lbl = _SPRINT_STATUS_COLORS.get(st, ("#94a3b8", "#f1f5f9", st.title()))
+
+    # Build issue rows
+    issue_rows = ""
+    for iss in issues:
+        issue_rows += f"""<tr>
+          <td><a href="/project/{project_id}/issue/{iss.id}" class="issue-link">{getattr(iss,'title','Untitled')}</a></td>
+          <td>{status_badge(getattr(iss,'status','backlog'))}</td>
+          <td>{type_badge(getattr(iss,'issue_type','task'))}</td>
+          <td>{priority_html(getattr(iss,'priority','medium'))}</td>
+          <td>{getattr(iss,'story_points','—') or '—'}</td>
+        </tr>"""
+
+    issues_section = f"""
+    <table class="data-table">
+      <thead><tr><th>Title</th><th>Status</th><th>Type</th><th>Priority</th><th>Points</th></tr></thead>
+      <tbody>{issue_rows or '<tr><td colspan="5" class="empty-state" style="padding:2rem">No issues in this sprint yet. Assign issues from the <a href="/project/'+project_id+'/backlog">backlog</a>.</td></tr>'}</tbody>
+    </table>"""
+
+    # Ceremonies section
+    cer_rows = ""
+    cer_types = {"planning": "📋", "review": "📊", "retro": "🔍", "standup": "☀️"}
+    for c in ceremonies:
+        ct = c.ceremony_type or "standup"
+        icon = cer_types.get(ct, "📌")
+        done_badge = '<span class="badge badge-green">Done</span>' if c.is_completed else '<span class="badge badge-yellow">Upcoming</span>'
+        cer_rows += f"<tr><td>{icon} {ct.title()}</td><td>{c.scheduled_at or '—'}</td><td>{c.duration_minutes or '—'} min</td><td>{done_badge}</td><td>{c.notes or ''}</td></tr>"
+
+    ceremony_section = f"""
+    <table class="data-table">
+      <thead><tr><th>Type</th><th>Scheduled</th><th>Duration</th><th>Status</th><th>Notes</th></tr></thead>
+      <tbody>{cer_rows or '<tr><td colspan="5" class="empty-state" style="padding:2rem">No ceremonies scheduled</td></tr>'}</tbody>
+    </table>"""
+
+    # Goals section
+    goal_rows = ""
+    gst_colors = {"not_started": "badge-gray", "in_progress": "badge-yellow", "achieved": "badge-green", "missed": "badge-red"}
+    for g in goals:
+        gst = g.status or "not_started"
+        goal_rows += f'<div style="display:flex;align-items:center;gap:0.75rem;padding:0.625rem 0;border-bottom:1px solid #f1f5f9"><span class="badge {gst_colors.get(gst,"badge-gray")}">{gst.replace("_"," ").title()}</span><span style="font-size:0.9rem">{g.description or "—"}</span></div>'
+
+    ceremony_modal = f"""
+    <div id="ceremony-modal" class="modal" onclick="if(event.target===this)document.getElementById('ceremony-modal').classList.remove('show')">
+      <div class="modal-box">
+        <div class="modal-head"><h3>Schedule Ceremony</h3><button class="modal-close" onclick="document.getElementById('ceremony-modal').classList.remove('show')">×</button></div>
+        <form method="post" action="/project/{project_id}/sprints/{sprint_id}/ceremony">
+          <div class="modal-body">
+            <div class="form-group">
+              <label>Type</label>
+              <select name="ceremony_type" class="form-control">
+                <option value="planning">Planning</option>
+                <option value="review">Review</option>
+                <option value="retro">Retrospective</option>
+                <option value="standup">Daily Standup</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Date & Time</label><input type="datetime-local" name="scheduled_at" class="form-control"></div>
+              <div class="form-group"><label>Duration (min)</label><input type="number" name="duration_minutes" class="form-control" value="60"></div>
+            </div>
+            <div class="form-group"><label>Notes</label><textarea name="notes" class="form-control" rows="2"></textarea></div>
+          </div>
+          <div class="modal-foot">
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('ceremony-modal').classList.remove('show')">Cancel</button>
+            <button type="submit" class="btn btn-primary">Schedule</button>
+          </div>
+        </form>
+      </div>
+    </div>"""
+
+    goal_modal = f"""
+    <div id="goal-modal" class="modal" onclick="if(event.target===this)document.getElementById('goal-modal').classList.remove('show')">
+      <div class="modal-box">
+        <div class="modal-head"><h3>Add Sprint Goal</h3><button class="modal-close" onclick="document.getElementById('goal-modal').classList.remove('show')">×</button></div>
+        <form method="post" action="/project/{project_id}/sprints/{sprint_id}/goal">
+          <div class="modal-body">
+            <div class="form-group"><label>Goal Description</label><textarea name="description" class="form-control" rows="3" placeholder="What should be accomplished?" required></textarea></div>
+          </div>
+          <div class="modal-foot">
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('goal-modal').classList.remove('show')">Cancel</button>
+            <button type="submit" class="btn btn-primary">Add Goal</button>
+          </div>
+        </form>
+      </div>
+    </div>"""
+
+    breadcrumb = (
+        f'<a href="/projects">Projects</a><span class="sep">›</span>'
+        f'<a href="/project/{project_id}/sprints">{proj_name} · Sprints</a>'
+        f'<span class="sep">›</span><span class="current">{sp.name or sprint_id}</span>'
+    )
+
+    content = f"""
+    {project_tabs(project_id, "sprints")}
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1.5rem;flex-wrap:wrap;gap:1rem">
+      <div>
+        <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.25rem">
+          <h2 style="font-size:1.35rem;font-weight:700">{sp.name or sprint_id}</h2>
+          <span class="badge" style="background:{bg};color:{col}">{lbl}</span>
+        </div>
+        <p style="color:var(--c-muted);font-size:0.875rem">{sp.goal or 'No goal set'}</p>
+        {'<p style="color:var(--c-muted);font-size:0.8rem;margin-top:0.25rem">'+sp.start_date+' → '+sp.end_date+'</p>' if sp.start_date or sp.end_date else ''}
+      </div>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('goal-modal').classList.add('show')">+ Goal</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ceremony-modal').classList.add('show')">+ Ceremony</button>
+        {'<form method="post" action="/project/'+project_id+'/sprints/'+sprint_id+'/start" style="display:inline"><button class="btn btn-success btn-sm">▶ Start Sprint</button></form>' if st=='planned' else ''}
+        {'<form method="post" action="/project/'+project_id+'/sprints/'+sprint_id+'/complete" style="display:inline"><button class="btn btn-ghost btn-sm">✓ Complete</button></form>' if st=='active' else ''}
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-chip"><span class="dot" style="background:{col}"></span>{total} Issues</div>
+      <div class="stat-chip"><span class="dot" style="background:#10b981"></span>{done} Done</div>
+      <div class="stat-chip"><span class="dot" style="background:#3b82f6"></span>{pct}% Complete</div>
+      <div class="stat-chip"><span class="dot" style="background:#8b5cf6"></span>{len(ceremonies)} Ceremonies</div>
+    </div>
+
+    <div style="margin-bottom:0.75rem">
+      <div class="progress-bar" style="height:10px;border-radius:5px">
+        <div class="progress-fill" style="width:{pct}%;background:{col};height:100%"></div>
+      </div>
+    </div>
+
+    {'<div class="detail-card" style="margin-bottom:1.25rem"><div class="detail-card-head">Sprint Goals</div><div class="detail-card-body">'+goal_rows+'<p style="color:var(--c-muted);font-size:0.85rem;margin-top:0.75rem">No goals yet</p></div></div>' if not goals else '<div class="detail-card" style="margin-bottom:1.25rem"><div class="detail-card-head">Sprint Goals</div><div class="detail-card-body">'+goal_rows+'</div></div>'}
+
+    <h3 style="font-size:0.95rem;font-weight:700;margin-bottom:0.75rem">Issues ({total})</h3>
+    {issues_section}
+
+    <h3 style="font-size:0.95rem;font-weight:700;margin:1.25rem 0 0.75rem">Ceremonies</h3>
+    {ceremony_section}
+
+    {ceremony_modal}
+    {goal_modal}"""
+
+    return HTMLResponse(render_app(f"{sp.name or sprint_id} · Sprint", content, project_id, "sprints",
+                                   breadcrumb=breadcrumb, user_name=user_name))
+
+
+@router.post("/project/{project_id}/sprints/{sprint_id}/ceremony")
+async def sprint_ceremony_create(
+    project_id: str, sprint_id: str,
+    ceremony_type: str = Form("standup"),
+    scheduled_at: str = Form(""),
+    duration_minutes: str = Form("60"),
+    notes: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    cer = Ceremony(
+        sprint_id=sprint_id,
+        ceremony_type=ceremony_type,
+        scheduled_at=scheduled_at or None,
+        duration_minutes=int(duration_minutes) if duration_minutes.isdigit() else None,
+        notes=notes or None,
+    )
+    db.add(cer)
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+    return RedirectResponse(url=f"/project/{project_id}/sprints/{sprint_id}", status_code=303)
+
+
+@router.post("/project/{project_id}/sprints/{sprint_id}/goal")
+async def sprint_goal_create(
+    project_id: str, sprint_id: str,
+    description: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    g = SprintGoal(sprint_id=sprint_id, description=description)
+    db.add(g)
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+    return RedirectResponse(url=f"/project/{project_id}/sprints/{sprint_id}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -1261,3 +1636,515 @@ async def issue_detail(project_id: str, issue_id: str, request: Request, db: Asy
     </div>"""
 
     return HTMLResponse(render_app(f"{issue_id} · {proj_name}", content, project_id, breadcrumb=breadcrumb, user_name="Demo User"))
+
+
+# ---------------------------------------------------------------------------
+# Agents roster
+# ---------------------------------------------------------------------------
+_AGENT_ROLE_BADGES = {
+    "actor":        ("badge-blue",   "Actor"),
+    "reviewer":     ("badge-purple", "Reviewer"),
+    "assistant":    ("badge-green",  "Assistant"),
+    "compressor":   ("badge-gray",   "Compressor"),
+    "scrum_master": ("badge-yellow", "Scrum Master"),
+}
+_AGENT_STATUS_DOT = {
+    "idle":    "#10b981",
+    "busy":    "#f59e0b",
+    "paused":  "#94a3b8",
+    "offline": "#475569",
+    "error":   "#ef4444",
+}
+
+
+@router.get("/agents", response_class=HTMLResponse)
+async def agents_list(request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.cookies.get("auth_token"):
+        return RedirectResponse(url="/login", status_code=302)
+    user_name = get_user_from_cookie(request) or "User"
+
+    from sqlalchemy import select
+    agents = []
+    models_map: dict = {}
+    try:
+        res = await db.execute(select(Agent).order_by(Agent.name))
+        agents = list(res.scalars().all())
+        mres = await db.execute(select(AIModel))
+        for m in mres.scalars().all():
+            models_map[m.id] = m
+    except Exception:
+        pass
+
+    rows = ""
+    for ag in agents:
+        role_cls, role_lbl = _AGENT_ROLE_BADGES.get(ag.role, ("badge-gray", ag.role.title()))
+        st_dot = _AGENT_STATUS_DOT.get(ag.availability_status, "#94a3b8")
+        mdl = models_map.get(ag.model_id)
+        mdl_name = f"{mdl.provider}/{mdl.model_name}" if mdl else "—"
+        active_badge = '<span class="badge badge-green">Active</span>' if ag.is_active else '<span class="badge badge-gray">Inactive</span>'
+        emoji = ag.avatar_emoji or "🤖"
+        rows += f"""<tr>
+          <td>
+            <div style="display:flex;align-items:center;gap:0.75rem">
+              <div class="avatar" style="background:#1e293b;width:32px;height:32px;font-size:1rem">{emoji}</div>
+              <div>
+                <a href="/agents/{ag.id}" class="issue-link">{ag.name}</a>
+                <div style="font-size:0.75rem;color:var(--c-muted)">{ag.description or ''}</div>
+              </div>
+            </div>
+          </td>
+          <td><span class="badge {role_cls}">{role_lbl}</span></td>
+          <td>
+            <span class="prio"><span class="prio-dot" style="background:{st_dot}"></span>{ag.availability_status.title()}</span>
+          </td>
+          <td><code style="font-size:0.75rem;background:#f1f5f9;padding:0.15rem 0.4rem;border-radius:0.25rem">{mdl_name}</code></td>
+          <td>{active_badge}</td>
+          <td>
+            <a href="/agents/{ag.id}/edit" class="btn btn-ghost btn-sm">Edit</a>
+          </td>
+        </tr>"""
+
+    if not rows:
+        rows = '<tr><td colspan="6" class="empty-state" style="padding:3rem">No agents registered yet</td></tr>'
+
+    create_modal = """
+    <div id="agent-modal" class="modal" onclick="if(event.target===this)document.getElementById('agent-modal').classList.remove('show')">
+      <div class="modal-box">
+        <div class="modal-head"><h3>Register Agent</h3><button class="modal-close" onclick="document.getElementById('agent-modal').classList.remove('show')">×</button></div>
+        <form method="post" action="/agents/create">
+          <div class="modal-body">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Name <span style="color:#ef4444">*</span></label>
+                <input type="text" name="name" class="form-control" placeholder="Alpha Agent" required>
+              </div>
+              <div class="form-group">
+                <label>Avatar Emoji</label>
+                <input type="text" name="avatar_emoji" class="form-control" placeholder="🤖" maxlength="4">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Role <span style="color:#ef4444">*</span></label>
+                <select name="role" class="form-control" required>
+                  <option value="actor">Actor</option>
+                  <option value="reviewer">Reviewer</option>
+                  <option value="assistant">Assistant</option>
+                  <option value="compressor">Compressor</option>
+                  <option value="scrum_master">Scrum Master</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Model ID <span style="color:#ef4444">*</span></label>
+                <input type="text" name="model_id" class="form-control" placeholder="(paste AI Model ID)" required>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Description</label>
+              <textarea name="description" class="form-control" rows="2"></textarea>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Temperature</label>
+                <input type="number" name="temperature" class="form-control" value="0.7" step="0.1" min="0" max="2">
+              </div>
+              <div class="form-group">
+                <label>Max Tokens</label>
+                <input type="number" name="max_tokens" class="form-control" value="4096">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>System Prompt</label>
+              <textarea name="system_prompt" class="form-control" rows="3" placeholder="You are..."></textarea>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('agent-modal').classList.remove('show')">Cancel</button>
+            <button type="submit" class="btn btn-primary">Register Agent</button>
+          </div>
+        </form>
+      </div>
+    </div>"""
+
+    stats = {}
+    for ag in agents:
+        stats[ag.availability_status] = stats.get(ag.availability_status, 0) + 1
+
+    stat_chips = "".join(
+        f'<div class="stat-chip"><span class="dot" style="background:{_AGENT_STATUS_DOT.get(k,"#94a3b8")}"></span>{v} {k.title()}</div>'
+        for k, v in stats.items()
+    )
+
+    content = f"""
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem">
+      <div>
+        <h2 style="font-size:1.35rem;font-weight:700">🤖 Agents</h2>
+        <p style="color:var(--c-muted);font-size:0.85rem">{len(agents)} registered agent{'s' if len(agents) != 1 else ''}</p>
+      </div>
+      <div style="display:flex;gap:0.75rem">
+        <a href="/models" class="btn btn-ghost">⚡ AI Models</a>
+        <button class="btn btn-primary" onclick="document.getElementById('agent-modal').classList.add('show')">+ Register Agent</button>
+      </div>
+    </div>
+    <div class="stats-row">{stat_chips}</div>
+    <table class="data-table">
+      <thead><tr><th>Agent</th><th>Role</th><th>Status</th><th>Model</th><th>Active</th><th></th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+    {create_modal}"""
+
+    breadcrumb = '<a href="/projects">Home</a><span class="sep">›</span><span class="current">Agents</span>'
+    return HTMLResponse(render_app("Agents · AgileAI", content, breadcrumb=breadcrumb, user_name=user_name))
+
+
+@router.post("/agents/create")
+async def agent_create(
+    request: Request,
+    name: str = Form(...),
+    role: str = Form("actor"),
+    model_id: str = Form(...),
+    description: str = Form(""),
+    avatar_emoji: str = Form(""),
+    temperature: str = Form("0.7"),
+    max_tokens: str = Form("4096"),
+    system_prompt: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    ag = Agent(
+        name=name,
+        role=role,
+        model_id=model_id,
+        description=description or None,
+        avatar_emoji=avatar_emoji or None,
+        temperature=float(temperature) if temperature else 0.7,
+        max_tokens=int(max_tokens) if max_tokens.isdigit() else 4096,
+        system_prompt=system_prompt or None,
+    )
+    db.add(ag)
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+    return RedirectResponse(url="/agents", status_code=303)
+
+
+@router.get("/agents/{agent_id}", response_class=HTMLResponse)
+async def agent_detail(agent_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.cookies.get("auth_token"):
+        return RedirectResponse(url="/login", status_code=302)
+    user_name = get_user_from_cookie(request) or "User"
+
+    from sqlalchemy import select
+    ag = None
+    mdl = None
+    try:
+        res = await db.execute(select(Agent).where(Agent.id == agent_id))
+        ag = res.scalar_one_or_none()
+        if ag:
+            mres = await db.execute(select(AIModel).where(AIModel.id == ag.model_id))
+            mdl = mres.scalar_one_or_none()
+    except Exception:
+        pass
+
+    if not ag:
+        return HTMLResponse(render_app("Agent Not Found", '<div class="alert alert-error">Agent not found</div>', user_name=user_name), status_code=404)
+
+    role_cls, role_lbl = _AGENT_ROLE_BADGES.get(ag.role, ("badge-gray", ag.role.title()))
+    st_dot = _AGENT_STATUS_DOT.get(ag.availability_status, "#94a3b8")
+
+    content = f"""
+    <div style="margin-bottom:1.25rem;display:flex;align-items:center;gap:1rem">
+      <a href="/agents" class="btn btn-ghost btn-sm">← Agents</a>
+      <a href="/agents/{agent_id}/edit" class="btn btn-ghost btn-sm">Edit</a>
+    </div>
+    <div class="detail-grid">
+      <div style="display:flex;flex-direction:column;gap:1.25rem">
+        <div class="detail-card">
+          <div class="detail-card-body">
+            <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem">
+              <div class="avatar" style="background:#1e293b;width:52px;height:52px;font-size:1.75rem">{ag.avatar_emoji or '🤖'}</div>
+              <div>
+                <h1 style="font-size:1.35rem;font-weight:700">{ag.name}</h1>
+                <div style="display:flex;gap:0.5rem;margin-top:0.25rem">
+                  <span class="badge {role_cls}">{role_lbl}</span>
+                  <span class="prio"><span class="prio-dot" style="background:{st_dot}"></span>{ag.availability_status.title()}</span>
+                </div>
+              </div>
+            </div>
+            <p style="font-size:0.9rem;color:var(--c-muted)">{ag.description or 'No description.'}</p>
+          </div>
+        </div>
+        {'<div class="detail-card"><div class="detail-card-head">System Prompt</div><div class="detail-card-body"><pre style="font-size:0.8rem;white-space:pre-wrap;color:var(--c-muted)">'+ag.system_prompt+'</pre></div></div>' if ag.system_prompt else ''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:1rem">
+        <div class="detail-card">
+          <div class="detail-card-head">Configuration</div>
+          <div class="detail-card-body">
+            <div class="meta-row"><span class="meta-label">Model</span><code style="font-size:0.8rem">{mdl.provider+"/"+mdl.model_name if mdl else ag.model_id}</code></div>
+            <div class="meta-row"><span class="meta-label">Temperature</span><strong>{ag.temperature}</strong></div>
+            <div class="meta-row"><span class="meta-label">Max Tokens</span><strong>{ag.max_tokens}</strong></div>
+            <div class="meta-row"><span class="meta-label">Max Concurrent</span><strong>{ag.max_concurrent_tasks}</strong></div>
+            <div class="meta-row"><span class="meta-label">Active</span>{'<span class="badge badge-green">Yes</span>' if ag.is_active else '<span class="badge badge-gray">No</span>'}</div>
+          </div>
+        </div>
+        <a href="/admin/agent_token_usage?agent_id={agent_id}" class="btn btn-ghost" style="text-align:center">📊 Token Usage</a>
+        <a href="/admin/execution_logs?agent_id={agent_id}" class="btn btn-ghost" style="text-align:center">📋 Execution Logs</a>
+      </div>
+    </div>"""
+
+    breadcrumb = f'<a href="/agents">Agents</a><span class="sep">›</span><span class="current">{ag.name}</span>'
+    return HTMLResponse(render_app(f"{ag.name} · Agent", content, breadcrumb=breadcrumb, user_name=user_name))
+
+
+@router.get("/agents/{agent_id}/edit", response_class=HTMLResponse)
+async def agent_edit_form(agent_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.cookies.get("auth_token"):
+        return RedirectResponse(url="/login", status_code=302)
+    user_name = get_user_from_cookie(request) or "User"
+
+    from sqlalchemy import select
+    ag = None
+    try:
+        res = await db.execute(select(Agent).where(Agent.id == agent_id))
+        ag = res.scalar_one_or_none()
+    except Exception:
+        pass
+
+    if not ag:
+        return RedirectResponse(url="/agents", status_code=302)
+
+    content = f"""
+    <div style="max-width:640px">
+      <div style="margin-bottom:1.25rem"><a href="/agents/{agent_id}" class="btn btn-ghost btn-sm">← Cancel</a></div>
+      <h2 style="font-size:1.2rem;font-weight:700;margin-bottom:1.25rem">Edit Agent: {ag.name}</h2>
+      <form method="post" action="/agents/{agent_id}/update" style="background:white;border:1.5px solid var(--c-border);border-radius:0.75rem;padding:1.5rem">
+        <div class="form-row">
+          <div class="form-group"><label>Name</label><input type="text" name="name" value="{ag.name}" class="form-control" required></div>
+          <div class="form-group"><label>Avatar Emoji</label><input type="text" name="avatar_emoji" value="{ag.avatar_emoji or ''}" class="form-control" maxlength="4"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Role</label>
+            <select name="role" class="form-control">
+              {''.join(f'<option value="{v}" {"selected" if v==ag.role else ""}>{l}</option>' for v,l in [("actor","Actor"),("reviewer","Reviewer"),("assistant","Assistant"),("compressor","Compressor"),("scrum_master","Scrum Master")])}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select name="availability_status" class="form-control">
+              {''.join(f'<option value="{v}" {"selected" if v==ag.availability_status else ""}>{v.title()}</option>' for v in ["idle","busy","paused","offline","error"])}
+            </select>
+          </div>
+        </div>
+        <div class="form-group"><label>Description</label><textarea name="description" class="form-control" rows="2">{ag.description or ''}</textarea></div>
+        <div class="form-row">
+          <div class="form-group"><label>Temperature</label><input type="number" name="temperature" value="{ag.temperature}" step="0.1" min="0" max="2" class="form-control"></div>
+          <div class="form-group"><label>Max Tokens</label><input type="number" name="max_tokens" value="{ag.max_tokens}" class="form-control"></div>
+        </div>
+        <div class="form-group"><label>System Prompt</label><textarea name="system_prompt" class="form-control" rows="4">{ag.system_prompt or ''}</textarea></div>
+        <div style="display:flex;gap:0.75rem;justify-content:flex-end;margin-top:1rem">
+          <a href="/agents/{agent_id}" class="btn btn-ghost">Cancel</a>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>"""
+
+    breadcrumb = f'<a href="/agents">Agents</a><span class="sep">›</span><a href="/agents/{agent_id}">{ag.name}</a><span class="sep">›</span><span class="current">Edit</span>'
+    return HTMLResponse(render_app(f"Edit {ag.name}", content, breadcrumb=breadcrumb, user_name=user_name))
+
+
+@router.post("/agents/{agent_id}/update")
+async def agent_update(
+    agent_id: str, request: Request,
+    name: str = Form(...),
+    role: str = Form("actor"),
+    avatar_emoji: str = Form(""),
+    description: str = Form(""),
+    availability_status: str = Form("idle"),
+    temperature: str = Form("0.7"),
+    max_tokens: str = Form("4096"),
+    system_prompt: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import select, update
+    await db.execute(update(Agent).where(Agent.id == agent_id).values(
+        name=name, role=role,
+        avatar_emoji=avatar_emoji or None,
+        description=description or None,
+        availability_status=availability_status,
+        temperature=float(temperature) if temperature else 0.7,
+        max_tokens=int(max_tokens) if max_tokens.isdigit() else 4096,
+        system_prompt=system_prompt or None,
+    ))
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+    return RedirectResponse(url=f"/agents/{agent_id}", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# AI Models registry
+# ---------------------------------------------------------------------------
+@router.get("/models", response_class=HTMLResponse)
+async def models_list(request: Request, db: AsyncSession = Depends(get_db)):
+    if not request.cookies.get("auth_token"):
+        return RedirectResponse(url="/login", status_code=302)
+    user_name = get_user_from_cookie(request) or "User"
+
+    from sqlalchemy import select
+    models = []
+    try:
+        res = await db.execute(select(AIModel).order_by(AIModel.provider, AIModel.model_name))
+        models = list(res.scalars().all())
+    except Exception:
+        pass
+
+    rows = ""
+    type_colors = {
+        "llm": "badge-blue", "embedding": "badge-purple", "vision": "badge-green",
+        "code": "badge-yellow", "compressor": "badge-gray",
+    }
+    for m in models:
+        local_badge = '<span class="badge badge-green">Local</span>' if m.is_local else '<span class="badge badge-gray">API</span>'
+        active_badge = '<span class="badge badge-green">Active</span>' if m.is_active else '<span class="badge badge-gray">Off</span>'
+        tc = type_colors.get(m.model_type, "badge-gray")
+        cost = ""
+        if m.cost_input_per_1k is not None:
+            cost = f"${m.cost_input_per_1k:.4f}/$" + (f"{m.cost_output_per_1k:.4f}" if m.cost_output_per_1k else "—") + " /1k"
+        rows += f"""<tr>
+          <td>
+            <div style="font-weight:600">{m.model_name}</div>
+            <div style="font-size:0.75rem;color:var(--c-muted)">{m.provider}</div>
+          </td>
+          <td><span class="badge {tc}">{m.model_type}</span></td>
+          <td>{local_badge}</td>
+          <td>{m.context_window or '—'}</td>
+          <td style="font-size:0.8rem;color:var(--c-muted)">{cost or '—'}</td>
+          <td>{active_badge}</td>
+          <td>
+            <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText('{m.id}')" title="Copy ID">⊕ Copy ID</button>
+          </td>
+        </tr>"""
+
+    if not rows:
+        rows = '<tr><td colspan="7" class="empty-state" style="padding:3rem">No AI models registered yet</td></tr>'
+
+    register_modal = """
+    <div id="model-modal" class="modal" onclick="if(event.target===this)document.getElementById('model-modal').classList.remove('show')">
+      <div class="modal-box">
+        <div class="modal-head"><h3>Register AI Model</h3><button class="modal-close" onclick="document.getElementById('model-modal').classList.remove('show')">×</button></div>
+        <form method="post" action="/models/create">
+          <div class="modal-body">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Provider <span style="color:#ef4444">*</span></label>
+                <input type="text" name="provider" class="form-control" placeholder="anthropic / ollama" required>
+              </div>
+              <div class="form-group">
+                <label>Model Name <span style="color:#ef4444">*</span></label>
+                <input type="text" name="model_name" class="form-control" placeholder="claude-sonnet-4-6" required>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Type</label>
+                <select name="model_type" class="form-control">
+                  <option value="llm">LLM</option>
+                  <option value="embedding">Embedding</option>
+                  <option value="vision">Vision</option>
+                  <option value="code">Code</option>
+                  <option value="compressor">Compressor</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Context Window</label>
+                <input type="number" name="context_window" class="form-control" placeholder="200000">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>API Endpoint (for Ollama)</label>
+              <input type="text" name="api_endpoint" class="form-control" placeholder="http://localhost:11434">
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Cost Input /1k tokens</label>
+                <input type="number" name="cost_input_per_1k" step="0.0001" class="form-control" placeholder="0.0030">
+              </div>
+              <div class="form-group">
+                <label>Cost Output /1k tokens</label>
+                <input type="number" name="cost_output_per_1k" step="0.0001" class="form-control" placeholder="0.0150">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label><input type="checkbox" name="is_local"> Local (Ollama)</label>
+              </div>
+              <div class="form-group">
+                <label><input type="checkbox" name="is_active" checked> Active</label>
+              </div>
+            </div>
+            <div class="form-group"><label>Notes</label><textarea name="notes" class="form-control" rows="2"></textarea></div>
+          </div>
+          <div class="modal-foot">
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('model-modal').classList.remove('show')">Cancel</button>
+            <button type="submit" class="btn btn-primary">Register Model</button>
+          </div>
+        </form>
+      </div>
+    </div>"""
+
+    content = f"""
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.25rem">
+      <div>
+        <h2 style="font-size:1.35rem;font-weight:700">⚡ AI Models</h2>
+        <p style="color:var(--c-muted);font-size:0.85rem">{len(models)} registered model{'s' if len(models) != 1 else ''}</p>
+      </div>
+      <div style="display:flex;gap:0.75rem">
+        <a href="/agents" class="btn btn-ghost">🤖 Agents</a>
+        <button class="btn btn-primary" onclick="document.getElementById('model-modal').classList.add('show')">+ Register Model</button>
+      </div>
+    </div>
+    <table class="data-table">
+      <thead><tr><th>Model</th><th>Type</th><th>Source</th><th>Context</th><th>Cost</th><th>Status</th><th></th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+    {register_modal}"""
+
+    breadcrumb = '<a href="/projects">Home</a><span class="sep">›</span><span class="current">AI Models</span>'
+    return HTMLResponse(render_app("AI Models · AgileAI", content, breadcrumb=breadcrumb, user_name=user_name))
+
+
+@router.post("/models/create")
+async def model_create(
+    request: Request,
+    provider: str = Form(...),
+    model_name: str = Form(...),
+    model_type: str = Form("llm"),
+    context_window: str = Form(""),
+    api_endpoint: str = Form(""),
+    cost_input_per_1k: str = Form(""),
+    cost_output_per_1k: str = Form(""),
+    is_local: str = Form(""),
+    is_active: str = Form("on"),
+    notes: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    m = AIModel(
+        provider=provider,
+        model_name=model_name,
+        model_type=model_type,
+        context_window=int(context_window) if context_window.isdigit() else None,
+        api_endpoint=api_endpoint or None,
+        cost_input_per_1k=float(cost_input_per_1k) if cost_input_per_1k else None,
+        cost_output_per_1k=float(cost_output_per_1k) if cost_output_per_1k else None,
+        is_local=is_local in ("on", "true", "1"),
+        is_active=is_active in ("on", "true", "1"),
+        notes=notes or None,
+    )
+    db.add(m)
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+    return RedirectResponse(url="/models", status_code=303)

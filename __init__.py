@@ -115,35 +115,77 @@ class DataClassification(Base, TimestampMixin):
 class Sprint(Base, TimestampMixin):
     __tablename__ = "sprints"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    project_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("projects.id"), nullable=True, index=True)
+    status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default="planned")
+    # planned | active | completed | cancelled
+    goal: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    start_date: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    end_date: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    velocity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 class SprintIssue(Base):
     __tablename__ = "sprint_issues"
     sprint_id: Mapped[str] = mapped_column(String(36), ForeignKey("sprints.id"), primary_key=True)
     issue_id: Mapped[str] = mapped_column(String(36), ForeignKey("issues.id"), primary_key=True)
+    added_at: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
 
 class SprintGoal(Base, TimestampMixin):
     __tablename__ = "sprint_goals"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    sprint_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("sprints.id"), nullable=True, index=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default="not_started")
+    # not_started | in_progress | achieved | missed
+    order_index: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=0)
 
 class SprintCapacity(Base, TimestampMixin):
     __tablename__ = "sprint_capacity"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    sprint_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("sprints.id"), nullable=True, index=True)
+    member_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    member_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    # user | agent
+    available_hours: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    story_points_capacity: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 class BurndownSnapshot(Base, TimestampMixin):
     __tablename__ = "burndown_snapshots"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    sprint_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("sprints.id"), nullable=True, index=True)
+    snapshot_date: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    remaining_points: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completed_points: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    total_points: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 class Ceremony(Base, TimestampMixin):
     __tablename__ = "ceremonies"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    sprint_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("sprints.id"), nullable=True, index=True)
+    ceremony_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # planning | review | retro | standup
+    scheduled_at: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    duration_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 class StandupRecord(Base, TimestampMixin):
     __tablename__ = "standup_records"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    sprint_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("sprints.id"), nullable=True, index=True)
+    participant_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    participant_type: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    # user | agent
+    recorded_date: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
 class StandupItem(Base, TimestampMixin):
     __tablename__ = "standup_items"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    record_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("standup_records.id"), nullable=True, index=True)
+    category: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # did | doing | blocker
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 # Quality gates
 class DefinitionOfReady(Base, TimestampMixin):
