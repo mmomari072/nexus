@@ -306,3 +306,95 @@ Test coverage includes:
 - Backlog size >1000 items? Rebalance is O(n) at that scale
 - Consider archiving old completed issues to reduce active backlog
 - Monitor `backlog_rank` gaps; trigger manual rebalance when smallest gap < 1.0
+
+---
+
+# Web UI Coverage Roadmap
+
+## Gap Analysis (2026-05-20)
+
+The Web UI currently exposes only 4 of the 85 ORM tables — leaving 81 tables (95%) inaccessible through the browser. This roadmap closes that gap.
+
+### Coverage matrix
+
+| Group | Tables | Covered | Missing |
+|-------|-------:|--------:|--------:|
+| AI & Identity | 4 | 1 (User) | 3 |
+| Skills | 3 | 0 | 3 |
+| RBAC | 4 | 0 | 4 |
+| Teams | 4 | 0 | 4 |
+| Projects | 4 | 1 (Project) | 3 |
+| Issues | 8 | 2 (Issue, IssueLabel) | 6 |
+| Sprints | 8 | 0 | 8 |
+| Quality Gates | 6 | 0 | 6 |
+| Workflow & Automation | 6 | 0 | 6 |
+| Regulatory & Compliance | 4 | 0 | 4 |
+| Agent Operations | 9 | 0 | 9 |
+| Memory & Compression | 4 | 0 | 4 |
+| Deliverables | 5 | 0 | 5 |
+| Reports | 3 | 0 | 3 |
+| Notifications | 3 | 0 | 3 |
+| Knowledge Base | 3 | 0 | 3 |
+| Contacts | 2 | 0 | 2 |
+| Jobs & Prompts & Analytics | 5 | 0 | 5 |
+| **TOTALS** | **85** | **4** | **81** |
+
+## Strategy
+
+Building 81 bespoke pages is wasteful — most stub tables only need basic CRUD. The chosen approach:
+
+1. **Generic admin shell** — an `/admin` section that introspects SQLAlchemy column metadata to auto-generate list/create/edit/delete views for every table. Sidebar groups tables by concern. One implementation covers all 85.
+2. **Dedicated workflow UIs** — for high-value tables with rich domain semantics (Sprints, Agents, Ceremonies, BackgroundJobs, Notifications, ApprovalRequests), build polished purpose-built screens that sit on top of the same data.
+3. **Iterative replacement** — start with the generic admin for coverage, then progressively replace generic views with dedicated UIs where workflow complexity warrants it.
+
+## Implementation phases
+
+### Phase A — Generic Admin (covers all 85 tables in one pass)
+- [x] Inventory all models and group assignments
+- [ ] `/admin` index — list 14 groups
+- [ ] `/admin/{table}` — list rows, paginated, with column introspection
+- [ ] `/admin/{table}/new` — create row, form fields auto-generated from column types
+- [ ] `/admin/{table}/{id}/edit` — edit row
+- [ ] `/admin/{table}/{id}` — view row with FK link-throughs
+- [ ] `/admin/{table}/{id}/delete` — confirm + delete
+- [ ] Sidebar "Admin" entry with collapsible group menu
+
+### Phase B — Dedicated UIs for top workflow tables
+- [ ] Sprints (8 tables) — replaces current empty Sprints tab
+- [ ] Agents & AI Models (3 tables) — agent roster, model registry, API keys
+- [ ] Ceremonies + Standups (3 tables) — sprint ceremonies calendar
+- [ ] Quality Gates (DoR/DoD) — per-project criteria editor + checks
+- [ ] Task Queue + Execution Logs — agent ops dashboard
+- [ ] Background Jobs — job queue monitor
+- [ ] Notifications — inbox with rules editor
+- [ ] Approval Requests + Workflows — approvals queue
+
+### Phase C — Cross-cutting polish
+- [ ] Global search across all entities
+- [ ] Audit trail viewer (IssueChangeLog, AccessLog, DeliverableStatusHistory)
+- [ ] Reports dashboard (ReportDefinition → ReportInstance)
+- [ ] Wiki / Knowledge base browser
+- [ ] Telegram integration settings
+
+## Phase A scope (Generic Admin) — full table inventory
+
+**AI & Identity:** `ai_models`, `agents`, `api_keys` (User already covered)
+**Skills:** `skill_definitions`, `agent_skills`, `issue_skill_requirements`
+**RBAC:** `roles`, `permissions`, `role_permissions`, `actor_role_assignments`
+**Teams:** `assignee_teams`, `assignee_team_members`, `agent_teams`, `agent_team_members`
+**Projects:** `labels`, `project_metadata`, `data_classifications`
+**Issues:** `issue_links`, `issue_assignments`, `issue_watchers`, `issue_instructions`, `instruction_completions`, `issue_templates`
+**Sprints:** `sprints`, `sprint_issues`, `sprint_goals`, `sprint_capacity`, `burndown_snapshots`, `ceremonies`, `standup_records`, `standup_items`
+**Quality Gates:** `definition_of_ready`, `definition_of_done`, `dor_checks`, `dod_checks`, `reviews`, `review_criteria`
+**Workflow:** `status_transitions`, `handovers`, `impediments`, `workflows`, `workflow_steps`, `workflow_runs`
+**Regulatory:** `compliance_checks`, `approval_workflows`, `approval_requests`, `access_log`
+**Agent Ops:** `agent_availability`, `task_queue`, `execution_logs`, `agent_feedback`, `agent_logs`, `agent_messages`, `agent_token_usage`, `agent_token_budget`, `token_budget_alerts`
+**Memory:** `project_memory`, `context_compression_rules`, `context_snapshots`, `content_embeddings`
+**Deliverables:** `deliverables`, `deliverable_status_history`, `deliverable_distributions`, `deliverable_dependencies`, `expected_deliverables`
+**Reports:** `report_definitions`, `report_instances`, `report_schedules`
+**Notifications:** `notification_rules`, `notification_templates`, `notifications`
+**Knowledge Base:** `wiki_pages`, `wiki_page_versions`, `attachments`
+**Contacts:** `user_contacts`, `telegram_commands`
+**Jobs/Prompts/Analytics:** `background_jobs`, `prompt_templates`, `prompt_versions`, `prompt_fragments`, `model_performance`
+**History/Audit:** `issue_change_log`, `notes`, `velocity_records`, `time_entries`
+

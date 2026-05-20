@@ -290,6 +290,10 @@ APP_HTML = """<!DOCTYPE html>
       <a href="#" class="nav-item">
         <span class="icon">◎</span> Team
       </a>
+      <div class="sidebar-section" style="margin-top:0.75rem">System</div>
+      <a href="/admin" class="nav-item {nav_admin}">
+        <span class="icon">⚙</span> Admin · All Tables
+      </a>
     </nav>
     <div class="sidebar-footer">
       <div class="user-pill">
@@ -453,7 +457,8 @@ def render_app(title: str, content: str, project_id: str = "", active_tab: str =
     initials = "".join(w[0].upper() for w in user_name.split()[:2]) or "U"
 
     sidebar_projects = ""
-    nav_projects = "active" if not project_id else ""
+    nav_projects = "active" if not project_id and active_tab != "admin" else ""
+    nav_admin = "active" if active_tab == "admin" else ""
     for p in PROJECTS:
         active = "active" if p["id"] == project_id else ""
         sidebar_projects += f'<a href="/project/{p["id"]}/backlog" class="nav-item nav-project {active}">{p["name"]}</a>\n'
@@ -472,6 +477,7 @@ def render_app(title: str, content: str, project_id: str = "", active_tab: str =
         content=content,
         sidebar_projects=sidebar_projects,
         nav_projects=nav_projects,
+        nav_admin=nav_admin,
         breadcrumb=breadcrumb,
         user_initials=initials,
         user_name=user_name,
