@@ -1,101 +1,95 @@
 # Sprint 1 Plan
 
-**Dates:** 2026-05-23 → 2026-06-06  
-**Sprint Goal:** CLI + TUI functional; Sprint API expanded; Alembic initialized.
+**Dates:** 2026-05-23 → 2026-06-06
+**Sprint Goal:** DB schema fully specified (no stub tables); Web UI has a real functional
+screen for every domain — no in-memory data, no placeholder lists.
 
-**Team:**
-| Agent | Track | Capacity |
-|-------|-------|----------|
-| Agent Alpha | CLI (Phase 3) | Full |
-| Agent Beta | TUI (Phase 4) | Full |
-| Agent Delta | API Expansion + Alembic | Full |
-| Agent Epsilon | Reviews | Part-time |
-| Agent Zeta | Scrum Master | Part-time |
+**Owner:** Claude (single actor this sprint)
+**Reviewer:** Mohammad OMARI — approves PR before merge to main
+
+---
+
+## Context
+
+Sprint 1 implements the "DB-first, Web UI as ground truth" strategy adopted 2026-05-23.
+Before other agents can build CLI, TUI, Desktop, or Agent Gateway, they need:
+1. A stable, complete DB schema (Phase A)
+2. A working Web UI that proves the schema (Phase B)
+3. Catalogs documenting both (Phase C — starts Sprint 2)
+
+Secondary clients (Phases 3–10) are deferred to Sprint 2 onwards.
 
 ---
 
 ## Sprint Backlog
 
-### Track A — CLI (Agent Alpha) · 19 pts
+### Track A — DB Design Completion (Phase A) · 14 pts
 
-| ID | Task | Points | Status |
-|----|------|--------|--------|
-| S1-01 | `agileai login / logout` with token file at `~/.agileai/token` | 2 | 🔲 |
-| S1-02 | `agileai config set-url <url>` | 1 | 🔲 |
-| S1-03 | `agileai backlog list <project_id>` — Rich.Table output | 3 | 🔲 |
-| S1-04 | `agileai backlog show <project_id> <id>` — Rich.Panel | 1 | 🔲 |
-| S1-05 | `agileai backlog estimate <project_id> <id>` — call estimate API | 2 | 🔲 |
-| S1-06 | `agileai backlog prioritize <project_id>` — ranked table | 1 | 🔲 |
-| S1-07 | `agileai sprint list <project_id>` — sprint cards with progress | 2 | 🔲 |
-| S1-08 | `agileai sprint create / start / complete` | 2 | 🔲 |
-| S1-09 | `agileai agents list` + `agileai models list` | 2 | 🔲 |
-| S1-10 | `pytest tests/test_cli.py` — ≥ 10 tests, all pass | 3 | 🔲 |
+| ID | Task | Group | Points | Status |
+|----|------|-------|--------|--------|
+| PA-01 | Audit AI & Identity: ai_models, agents, users, api_keys | AI & Identity | 2 | 🔲 |
+| PA-02 | Audit Issues group: issues, assignments, labels, links, change_log, instructions, attachments | Issues | 3 | 🔲 |
+| PA-03 | Audit Sprint group: sprints, sprint_issues, goals, capacity, burndown, ceremonies, standups | Sprints | 3 | 🔲 |
+| PA-04 | Audit Projects, RBAC, Skills groups | Foundation | 2 | 🔲 |
+| PA-05 | Audit Agent Ops, Background Jobs, Quality Gates groups | Ops | 2 | 🔲 |
+| PA-06 | Audit Notifications, Wiki, Regulatory, Reports groups | Extended | 2 | 🔲 |
+| PA-07 | Write `docs/DB_CHANGES.md` — column additions summary | Docs | 1 | 🔲 |
 
 **Definition of Done for Track A:**
-- All commands listed above run without errors against a local server
-- `agileai --help` shows correct command tree
-- `pytest tests/test_cli.py` green
-- `pyproject.toml [project.scripts]` has `agileai = "agileai.cli.main:app"`
-- PR reviewed by Agent Epsilon and merged
+- `python -c "from __init__ import *; print('OK')"` succeeds
+- No table has only `id` + timestamps (zero stub tables)
+- Every table has a one-line docstring or comment
+- `docs/DB_CHANGES.md` lists every column added or modified
+- DB deletes and re-creates cleanly from the updated models
 
-### Track B — TUI (Agent Beta) · 21 pts
+---
 
-| ID | Task | Points | Status |
-|----|------|--------|--------|
-| S1-11 | LoginScreen with form validation + token storage | 3 | 🔲 |
-| S1-12 | ProjectsScreen — card grid, `Enter` to select | 3 | 🔲 |
-| S1-13 | BacklogScreen — DataTable, `e`=estimate, `n`=new, `Enter`=detail | 5 | 🔲 |
-| S1-14 | SprintsScreen — sprint list with progress indicators | 3 | 🔲 |
-| S1-15 | AgentsScreen — agent roster with status dots | 2 | 🔲 |
-| S1-16 | IssueDetailScreen — 2-column, description + metadata | 3 | 🔲 |
-| S1-17 | theme.css — readable dark/light theme | 2 | 🔲 |
+### Track B — Web UI Completion (Phase B) · 18 pts
+
+| ID | Task | Route | Points | Status |
+|----|------|-------|--------|--------|
+| PB-01 | Replace in-memory `PROJECTS` list with real DB query | `GET /` | 2 | 🔲 |
+| PB-02 | Users list screen | `GET /users` | 2 | 🔲 |
+| PB-03 | User detail screen | `GET /users/{id}` | 1 | 🔲 |
+| PB-04 | Complete Agents roster — skills + availability dots | `GET /agents` | 2 | 🔲 |
+| PB-05 | Complete Sprint detail — burndown chart + standup log | `GET /project/{id}/sprints/{sid}` | 2 | 🔲 |
+| PB-06 | Task Queue screen — queue table + execution log | `GET /ops/tasks` | 2 | 🔲 |
+| PB-07 | Notifications inbox — list + mark-read | `GET /notifications` | 2 | 🔲 |
+| PB-08 | Reports screen — velocity table + burndown summary | `GET /reports` | 2 | 🔲 |
+| PB-09 | Audit log screen — access_log table with filters | `GET /audit` | 1 | 🔲 |
+| PB-10 | Approval workflows screen — pending approvals list | `GET /approvals` | 1 | 🔲 |
+| PB-11 | Wiki browser — page list + inline editor | `GET /wiki` | 2 | 🔲 |
 
 **Definition of Done for Track B:**
-- `agileai tui` launches without ImportError
-- Can navigate: Login → Projects → Backlog → issue detail
-- No crashes on any normal navigation path
-- Key bindings documented in `agileai/tui/bindings.py`
-- PR reviewed by Agent Epsilon and merged
-
-### Track C — API Expansion + Alembic (Agent Delta) · 17 pts
-
-| ID | Task | Points | Status |
-|----|------|--------|--------|
-| S1-18 | Sprint REST API (`/api/v1/sprints/*`) — 8 endpoints | 5 | 🔲 |
-| S1-19 | Projects API — replace in-memory `PROJECTS` with real DB | 3 | 🔲 |
-| S1-20 | Agents API (`/api/v1/agents/*`) — CRUD + availability | 4 | 🔲 |
-| S1-21 | Alembic: `alembic init`, first migration, `alembic upgrade head` | 3 | 🔲 |
-| S1-22 | `.env.example` + `pydantic-settings` config class | 2 | 🔲 |
-
-**Definition of Done for Track C:**
-- `GET /api/v1/sprints/projects/proj-1` returns list (even empty)
-- `GET /api/v1/projects/` returns real DB rows
-- `alembic upgrade head` runs without error on fresh DB
-- `.env.example` covers all required vars
-- PR reviewed and merged
+- `GET /` shows real projects from DB (no hard-coded list)
+- All 11 new screens render without error against a live DB
+- No `PROJECTS = [...]` or similar in-memory stubs anywhere in routes.py
+- HTMX actions (status-change, estimate, reorder) all hit real DB endpoints
+- Server starts with `uvicorn agileai.api.main:app` — zero import errors
 
 ---
 
 ## Dependency Map
 
 ```
-S1-18 (Sprint API) ──→ S1-07 (CLI sprint list)  [BLOCKS]
-S1-18 (Sprint API) ──→ S1-14 (TUI Sprints)       [BLOCKS]
-S1-19 (Projects API) → S1-03 (CLI backlog list)  [SOFT]
-S1-21 (Alembic) ─────→ S1-22 (.env)             [SEQUENCE]
+PA-01 → PA-02 → PA-03 → PA-04 → PA-05 → PA-06 (sequential, DB integrity order)
+                                                   ↓
+                                              PA-07 (DB_CHANGES.md)
+                                                   ↓
+PB-01 → PB-02 → ... → PB-11  (can run in any order AFTER Track A complete)
 ```
 
-Agent Delta should **prioritize S1-18 and S1-19 first** to unblock Tracks A and B.
+Track B must not start until Track A is complete — the Web UI depends on the finalized schema.
 
 ---
 
 ## Daily Standup Schedule
 
-Standups are async — each agent posts a 3-line update to `docs/PROJECT_LOG.md` when their session starts.
+Standups are async — Claude posts a 3-line update to `docs/PROJECT_LOG.md` at session start.
 
 Format:
 ```
-### Standup — Agent Alpha — YYYY-MM-DD
+### Standup — Claude — YYYY-MM-DD
 - Done: ...
 - Doing: ...
 - Blocked: ...
@@ -118,21 +112,23 @@ Format:
 
 | Risk | Likelihood | Impact | Response |
 |------|-----------|--------|----------|
-| Sprint API blocks CLI/TUI | High | High | Agent Delta starts with S1-18 and S1-19 |
-| TUI Textual API changes | Low | Medium | Pin to `textual>=0.61.0`, test on install |
-| CLI token file paths differ on Windows | Medium | Medium | Use `Path.home() / ".agileai"` — cross-platform |
-| Alembic async setup complexity | Medium | Medium | Use `alembic.runtime.migration` with async engine wrapper |
+| Stub table has deep FK dependencies | Medium | Medium | Add nullable columns; delete/recreate DB |
+| Web UI route breaks after model change | Medium | Medium | Test each screen after Track A finishes |
+| Wiki/Approval tables too complex for Sprint 1 | Low | Low | Defer to generic admin; deliver basic screen |
+| DB recreate loses test seed data | High | Low | Write seed data script before Track A starts |
 
 ---
 
 ## Definition of Done (Sprint 1)
 
 Sprint 1 is done when:
-- [ ] `agileai backlog list proj-1` shows data from real DB
-- [ ] `agileai tui` launches and all screens navigable
-- [ ] `GET /api/v1/sprints/projects/proj-1` functional
-- [ ] `alembic upgrade head` works on clean install
-- [ ] All PRs from tracks A, B, C merged and reviewed
-- [ ] `pytest tests/` fully green (including new CLI tests)
+- [ ] All PA-01 through PA-07 tasks complete
+- [ ] All PB-01 through PB-11 tasks complete
+- [ ] `python -c "from __init__ import *"` runs without error
+- [ ] `pytest tests/test_backlog.py` still passes (no regressions)
+- [ ] `GET /` returns real DB projects
+- [ ] Server starts from clean DB with zero errors
+- [ ] `docs/DB_CHANGES.md` written and committed
+- [ ] PR merged to main, reviewed by Mohammad OMARI
 - [ ] `docs/BOARD.md` updated with Sprint 1 results
 - [ ] `docs/PROJECT_LOG.md` has Sprint 1 Review entry

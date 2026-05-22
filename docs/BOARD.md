@@ -1,7 +1,7 @@
 # AgileAI Kanban Board
 
-**Sprint 1** · 2026-05-23 → 2026-06-06  
-**Sprint Goal:** CLI + TUI functional; API expanded for sprints and projects.
+**Sprint 1** · 2026-05-23 → 2026-06-06
+**Sprint Goal:** DB schema fully specified; Web UI complete with real DB screens.
 
 Last updated: 2026-05-23
 
@@ -42,99 +42,102 @@ _Empty._
 
 ## 📋 Sprint 1 Backlog
 
-### Phase 3 — CLI (Owner: Agent Alpha)
+### Phase A — DB Design Completion (Owner: Claude)
 
 | ID | Task | Priority | Points |
 |----|------|----------|--------|
-| S1-01 | `agileai login / logout` with token file | P0 | 2 |
-| S1-02 | `agileai config set-url` | P0 | 1 |
-| S1-03 | `agileai backlog list <project_id>` — Rich table | P0 | 3 |
-| S1-04 | `agileai backlog show <project_id> <id>` | P1 | 1 |
-| S1-05 | `agileai backlog estimate <project_id> <id>` | P1 | 2 |
-| S1-06 | `agileai backlog prioritize <project_id>` | P1 | 1 |
-| S1-07 | `agileai sprint list <project_id>` | P0 | 2 |
-| S1-08 | `agileai sprint create / start / complete` | P1 | 2 |
-| S1-09 | `agileai agents list` + `agileai models list` | P2 | 2 |
-| S1-10 | `pytest tests/test_cli.py` ≥ 10 tests | P0 | 3 |
+| PA-01 | Audit AI & Identity tables | P0 | 2 |
+| PA-02 | Audit Issues group | P0 | 3 |
+| PA-03 | Audit Sprint group | P0 | 3 |
+| PA-04 | Audit Projects, RBAC, Skills groups | P0 | 2 |
+| PA-05 | Audit Agent Ops, Background Jobs, Quality Gates | P1 | 2 |
+| PA-06 | Audit Notifications, Wiki, Regulatory, Reports | P1 | 2 |
+| PA-07 | Write `docs/DB_CHANGES.md` | P0 | 1 |
+
+**Total: 15 points**
+
+### Phase B — Web UI Completion (Owner: Claude)
+
+| ID | Task | Priority | Points |
+|----|------|----------|--------|
+| PB-01 | Replace in-memory PROJECTS with real DB | P0 | 2 |
+| PB-02 | Users list screen (`/users`) | P0 | 2 |
+| PB-03 | User detail screen (`/users/{id}`) | P1 | 1 |
+| PB-04 | Complete Agents roster — skills + availability | P0 | 2 |
+| PB-05 | Complete Sprint detail — burndown + standup log | P1 | 2 |
+| PB-06 | Task Queue screen (`/ops/tasks`) | P1 | 2 |
+| PB-07 | Notifications inbox (`/notifications`) | P1 | 2 |
+| PB-08 | Reports screen (`/reports`) | P2 | 2 |
+| PB-09 | Audit log screen (`/audit`) | P2 | 1 |
+| PB-10 | Approval workflows screen (`/approvals`) | P2 | 1 |
+| PB-11 | Wiki browser + editor (`/wiki`) | P2 | 2 |
 
 **Total: 19 points**
-
-### Phase 4 — TUI (Owner: Agent Beta)
-
-| ID | Task | Priority | Points |
-|----|------|----------|--------|
-| S1-11 | LoginScreen with form + auth | P0 | 3 |
-| S1-12 | ProjectsScreen — card grid, keyboard nav | P0 | 3 |
-| S1-13 | BacklogScreen — DataTable, `e` for estimate | P0 | 5 |
-| S1-14 | SprintsScreen — sprint cards | P1 | 3 |
-| S1-15 | AgentsScreen — agent roster | P2 | 2 |
-| S1-16 | IssueDetailScreen — 2-column | P1 | 3 |
-| S1-17 | theme.css — dark/light theme | P2 | 2 |
-
-**Total: 21 points**
-
-### Phase 9 — API Expansion (Owner: Agent Delta)
-
-| ID | Task | Priority | Points |
-|----|------|----------|--------|
-| S1-18 | Sprint REST API (`/api/v1/sprints/*`) | P0 | 5 |
-| S1-19 | Projects API — replace in-memory PROJECTS | P0 | 3 |
-| S1-20 | Agents API (`/api/v1/agents/*`) | P1 | 4 |
-| S1-21 | Alembic: init + first migration | P1 | 3 |
-| S1-22 | `.env.example` + pydantic-settings config | P1 | 2 |
-
-**Total: 17 points**
 
 ---
 
 ## 📦 Product Backlog (Future Sprints)
 
-### Sprint 2 (2026-06-07 → 2026-06-20)
+### Sprint 2 (2026-06-07 → 2026-06-20) — Catalog + CLI + API
 
 | ID | Task | Owner | Points |
 |----|------|-------|--------|
-| S2-01 | Desktop: Login + MainWindow | Agent Gamma | 5 |
-| S2-02 | Desktop: BacklogTable (QTableView) | Agent Gamma | 5 |
-| S2-03 | Desktop: Sprint + Agents widgets | Agent Gamma | 4 |
-| S2-04 | Agent Gateway: poll / result / heartbeat API | Agent Alpha | 5 |
-| S2-05 | Agent Gateway: MCP server tool definitions | Agent Alpha | 5 |
-| S2-06 | Agent Gateway: context assembly | Agent Alpha | 3 |
-| S2-07 | Telegram: bot + /backlog /sprint | Agent Beta | 3 |
-| S2-08 | Telegram: /assign /status /standup | Agent Beta | 2 |
-| S2-09 | Telegram: sprint event notifications | Agent Beta | 2 |
-| S2-10 | API: Notifications + Approvals | Agent Delta | 4 |
-| S2-11 | API: Reports + Wiki | Agent Delta | 4 |
-| S2-12 | Web: Replace in-memory projects with DB | Agent Delta | 2 |
+| PC-01 | `docs/DB_CATALOG.md` — 85-table schema reference | Claude | 4 |
+| PC-02 | `docs/ROUTE_CATALOG.md` — full route reference | Claude | 3 |
+| S2-01 | CLI: `agileai login / logout` with token file | Agent Alpha | 2 |
+| S2-02 | CLI: `agileai backlog list/show/estimate/prioritize` | Agent Alpha | 4 |
+| S2-03 | CLI: `agileai sprint list/create/start/complete` | Agent Alpha | 2 |
+| S2-04 | CLI: `agileai agents list` + `agileai models list` | Agent Alpha | 2 |
+| S2-05 | CLI: `pytest tests/test_cli.py` ≥ 10 tests | Agent Alpha | 3 |
+| S2-06 | API: Sprint REST endpoints (`/api/v1/sprints/*`) | Agent Delta | 5 |
+| S2-07 | API: Projects real DB (`/api/v1/projects/*`) | Agent Delta | 3 |
+| S2-08 | API: Agents CRUD (`/api/v1/agents/*`) | Agent Delta | 4 |
+| S2-09 | Alembic: `alembic init` + first migration | Agent Delta | 3 |
+| S2-10 | `.env.example` + pydantic-settings config class | Agent Delta | 2 |
 
-### Sprint 3 (2026-06-21 → 2026-07-04)
-
-| ID | Task | Owner | Points |
-|----|------|-------|--------|
-| S3-01 | Compression: APScheduler worker | Agent Gamma | 3 |
-| S3-02 | Compression: Ollama summarization | Agent Gamma | 3 |
-| S3-03 | Compression: nomic-embed-text embeddings | Agent Gamma | 3 |
-| S3-04 | Docker: `docker-compose.prod.yml` | Agent Delta | 3 |
-| S3-05 | Settings: `.env` + pydantic-settings full | Agent Delta | 2 |
-| S3-06 | Alembic: auto-upgrade on startup | Agent Delta | 2 |
-| S3-07 | CI: GitHub Actions pipeline | Agent Delta | 3 |
-| S3-08 | E2E: Playwright 5 critical paths | Agent Epsilon | 5 |
-| S3-09 | Desktop: PyInstaller packaging | Agent Gamma | 3 |
-
-### Sprint 4 (2026-07-05 → 2026-07-18)
+### Sprint 3 (2026-06-21 → 2026-07-04) — TUI + Desktop
 
 | ID | Task | Owner | Points |
 |----|------|-------|--------|
-| S4-01 | Web: Reports dashboard | Agent Beta | 5 |
-| S4-02 | Web: Velocity + burndown charts | Agent Beta | 4 |
-| S4-03 | Web: Wiki browser | Agent Beta | 3 |
-| S4-04 | Web: Notifications inbox | Agent Beta | 3 |
-| S4-05 | Web: Approval workflows UI | Agent Alpha | 4 |
-| S4-06 | Web: Global search | Agent Alpha | 3 |
-| S4-07 | Web: Audit trail viewer | Agent Alpha | 3 |
-| S4-08 | Load testing: k6 script | Agent Epsilon | 2 |
-| S4-09 | Security: OWASP review | Agent Epsilon | 3 |
-| S4-10 | Docs: README update + API docs | Agent Delta | 2 |
-| S4-11 | Release: v1.0.0 tag + changelog | All | 1 |
+| S3-01 | TUI: LoginScreen + ProjectsScreen | Agent Beta | 3 |
+| S3-02 | TUI: BacklogScreen — DataTable, `e`=estimate | Agent Beta | 5 |
+| S3-03 | TUI: SprintsScreen + AgentsScreen | Agent Beta | 3 |
+| S3-04 | TUI: IssueDetailScreen + theme.css | Agent Beta | 3 |
+| S3-05 | Desktop: LoginDialog + MainWindow shell | Agent Gamma | 5 |
+| S3-06 | Desktop: BacklogTable (QTableView) | Agent Gamma | 5 |
+| S3-07 | Desktop: Sprint + Agents widgets | Agent Gamma | 4 |
+| S3-08 | API: Notifications + Approvals endpoints | Agent Delta | 4 |
+| S3-09 | API: Reports + Wiki endpoints | Agent Delta | 4 |
+
+### Sprint 4 (2026-07-05 → 2026-07-18) — Gateway + Telegram + Compression
+
+| ID | Task | Owner | Points |
+|----|------|-------|--------|
+| S4-01 | Agent Gateway: poll / result / heartbeat API | Agent Alpha | 5 |
+| S4-02 | Agent Gateway: MCP server tool definitions | Agent Alpha | 5 |
+| S4-03 | Agent Gateway: context assembly | Agent Alpha | 3 |
+| S4-04 | Telegram: bot + /backlog /sprint /assign | Agent Beta | 3 |
+| S4-05 | Telegram: /status /standup + notifications | Agent Beta | 2 |
+| S4-06 | Compression: APScheduler worker + Ollama | Agent Gamma | 3 |
+| S4-07 | Compression: nomic-embed-text embeddings | Agent Gamma | 3 |
+| S4-08 | Desktop: PyInstaller packaging | Agent Gamma | 3 |
+
+### Sprint 5 (2026-07-19 → 2026-08-01) — Production + Polish
+
+| ID | Task | Owner | Points |
+|----|------|-------|--------|
+| S5-01 | Docker: `docker-compose.prod.yml` | Agent Delta | 3 |
+| S5-02 | Alembic: auto-upgrade on startup | Agent Delta | 2 |
+| S5-03 | CI: GitHub Actions lint + test + build | Agent Delta | 3 |
+| S5-04 | E2E: Playwright 5 critical paths | Agent Epsilon | 5 |
+| S5-05 | Load testing: k6 script | Agent Epsilon | 2 |
+| S5-06 | Security: OWASP review | Agent Epsilon | 3 |
+| S5-07 | Web: Reports dashboard + velocity charts | Agent Beta | 5 |
+| S5-08 | Web: Approval workflows + Global search | Agent Alpha | 4 |
+| S5-09 | Web: Audit trail viewer | Agent Alpha | 3 |
+| S5-10 | CLI: pip packaging | Agent Alpha | 2 |
+| S5-11 | Docs: README update + API docs | Agent Delta | 2 |
+| S5-12 | Release: v1.0.0 tag + changelog | All | 1 |
 
 ---
 
@@ -143,10 +146,11 @@ _Empty._
 | Sprint | Committed | Delivered | Velocity |
 |--------|-----------|-----------|----------|
 | Sprint 0 (Pre-sprint) | — | 57 pts | — |
-| Sprint 1 | 57 pts | — | TBD |
-| Sprint 2 | 44 pts | — | TBD |
-| Sprint 3 | 27 pts | — | TBD |
-| Sprint 4 | 33 pts | — | TBD |
+| Sprint 1 | 34 pts (Phase A + B) | — | TBD |
+| Sprint 2 | 35 pts (Catalog + CLI + API) | — | TBD |
+| Sprint 3 | 37 pts (TUI + Desktop) | — | TBD |
+| Sprint 4 | 27 pts (Gateway + Telegram + Compression) | — | TBD |
+| Sprint 5 | 35 pts (Production + Polish) | — | TBD |
 
 ---
 

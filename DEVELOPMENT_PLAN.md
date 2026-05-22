@@ -10,11 +10,13 @@
 
 | Layer | Module | Status | Coverage |
 |-------|--------|--------|----------|
-| Data | SQLAlchemy ORM (85 tables) | ✅ Complete | 100% |
+| Data | SQLAlchemy ORM (85 tables) | 🟡 Stubs complete | Fields need full specification |
 | API | FastAPI REST endpoints | 🟡 Partial | ~30% — backlog done, rest stubs |
 | Auth | JWT + passlib | ✅ Complete | Web + API |
 | SDK | HTTP Client (sync + async) | ✅ Complete | Full backlog API |
-| Web UI | 66 routes, 85-table admin | ✅ Complete | All tables visible |
+| Web UI | 66 routes, 85-table admin | 🟡 Partial | Generic admin covers all tables; dedicated UIs incomplete |
+| DB Catalog | Schema reference document | ❌ Not started | — |
+| Web UI Catalog | Route + screen reference | ❌ Not started | — |
 | CLI | agileai/cli/ | ❌ Not started | — |
 | TUI | agileai/tui/ | ❌ Not started | — |
 | Desktop | agileai/desktop/ | ❌ Not started | — |
@@ -28,6 +30,30 @@
 
 ---
 
+## 1.5 Development Strategy
+
+**Adopted 2026-05-23.** Before building any secondary clients (CLI, TUI, Desktop, Agent Gateway), the DB schema and Web UI must be fully designed and documented. This prevents field-name drift across clients and ensures all integrations build against a stable contract.
+
+**Sequence:**
+
+```
+Phase A: DB Design Completion   ← Claude, Sprint 1
+       ↓
+Phase B: Web UI Completion      ← Claude, Sprint 1
+       ↓
+Phase C: Catalog Writing        ← Claude, Sprint 2
+       ↓
+Phases 3–10: All other clients  ← Agent Alpha / Beta / Gamma / Delta, Sprints 2–5
+```
+
+**Why catalog-first:**
+- CLI, TUI, Desktop, and Gateway all consume the same API — defining it once prevents 4× reimplementation
+- Web UI serves as the ground truth for data shapes — what renders in the browser is what the API returns
+- DB catalog locks field names, types, and nullability before agents start writing queries
+- Route catalog gives every agent team a complete list of endpoints, request shapes, and response shapes without reading source code
+
+---
+
 ## 2. Agent Team
 
 Six AI agent roles are assigned to this project. Each has a dedicated playbook
@@ -35,12 +61,13 @@ in `docs/AGENTS_PLAYBOOK.md`.
 
 | Agent Name | Role | Sprint 1 Owner | Sprint 2 Owner |
 |------------|------|---------------|---------------|
+| **Claude** | **Architect** | **Phase A: DB + Phase B: Web UI** | **Phase C: Catalog** |
 | Agent Alpha | Actor — CLI | Phase 3: CLI | Phase 6: Agent Gateway (REST) |
 | Agent Beta | Actor — TUI | Phase 4: TUI | Phase 7: Telegram Bot |
 | Agent Gamma | Actor — Desktop | Phase 5: Desktop | Phase 8: Compression Agent |
-| Agent Delta | Actor — Backend | API expansion + Alembic | Production hardening |
-| Agent Epsilon | Reviewer | All PRs sprint 1 | All PRs sprint 2 |
-| Agent Zeta | Scrum Master | Sprint 1 ceremonies | Sprint 2 ceremonies |
+| Agent Delta | Actor — Backend | Phase 9: API expansion | Phase 10: Production hardening |
+| Agent Epsilon | Reviewer | All PRs sprint 2+ | All PRs sprint 3+ |
+| Agent Zeta | Scrum Master | Sprint 1–2 ceremonies | Sprint 3+ ceremonies |
 
 Human coordinator: **Mohammad OMARI** — approves PRs, resolves blockers.
 
@@ -48,7 +75,146 @@ Human coordinator: **Mohammad OMARI** — approves PRs, resolves blockers.
 
 ## 3. Development Phases
 
-### Phase 3 — CLI (`agileai/cli/`) 📅 Sprint 1
+### Phase A — DB Design Completion 📅 Sprint 1
+
+**Owner:** Claude (current session)
+**Branch:** `feature/phase-a-db-design`
+**Estimated effort:** 3–4 days
+**Blocks:** Phase B, Phase C, and ultimately all API and client work
+
+Audit all 85 ORM tables across 14 concern groups. For each table, verify:
+- All business-relevant fields are present (no stub-only tables)
+- Column types are correct (String lengths, Text vs String, Integer vs Float)
+- All FKs are declared and point to the right parent table
+- Appropriate `nullable` / `index` / `unique` constraints
+- Seed data rows exist for demo/test use
+
+**Groups to audit (14):**
+
+| Group | Tables | Priority |
+|-------|--------|----------|
+| AI & Identity | ai_models, agents, users, api_keys | P0 — all other tables reference users/agents |
+| Issues | issues, issue_assignments, issue_labels, issue_links, issue_change_log, issue_instructions, issue_attachments | P0 — core board entity |
+| Sprints | sprints, sprint_issues, sprint_goals, sprint_capacity, burndown_snapshots, ceremonies, standup_records, standup_items | P0 — sprint lifecycle |
+| Skills | skill_definitions, agent_skills, issue_skill_requirements | P1 |
+| RBAC | roles, permissions, role_permissions, actor_role_assignments | P1 |
+| Projects | projects, project_members, project_settings | P0 — top-level namespace |
+| Agent Ops | task_queue, execution_logs, agent_feedback, agent_availability | P1 |
+| Background Jobs | background_jobs, job_results | P1 |
+| Context / Compression | context_snapshots, project_memory, content_embeddings | P2 |
+| Quality Gates | definition_of_ready, definition_of_done, dor_checks, dod_checks | P1 |
+| Notifications | notifications, notification_preferences | P1 |
+| Wiki / Knowledge | wiki_pages, wiki_revisions, wiki_links | P2 |
+| Regulatory | access_log, compliance_checks, approval_workflows, approval_requests, deliverable_status_history | P1 |
+| Reports | reports, report_snapshots, data_classifications | P2 |
+
+**Output:** All 85 tables fully specified in `__init__.py`. A summary of every change made is written to `docs/DB_CHANGES.md`.
+
+**Definition of done:**
+- `python -c "from __init__ import *; print('OK')"` succeeds
+- Every table has at least one human-readable non-id field
+- No stub tables (tables with only `id` + timestamps)
+- `docs/DB_CHANGES.md` lists every column added/modified
+
+---
+
+### Phase B — Web UI Completion 📅 Sprint 1
+
+**Owner:** Claude (current session)
+**Branch:** `feature/phase-b-webui`
+**Estimated effort:** 4–5 days
+**Depends on:** Phase A
+**Blocks:** Phase C
+
+Replace every generic admin stub with a dedicated, functional screen. Each screen must perform real DB queries — no in-memory data, no placeholder lists.
+
+**Screens to build or complete:**
+
+| Screen | Route | Status | Required actions |
+|--------|-------|--------|-----------------|
+| Projects list | `/` | 🟡 In-memory PROJECTS | Replace with real DB query |
+| Project detail | `/project/{id}` | ✅ Works | — |
+| Backlog tab | `/project/{id}/backlog` | ✅ Works | — |
+| Sprint tab | `/project/{id}/sprints` | ✅ Works | — |
+| Issue detail | `/project/{id}/issues/{iid}` | ✅ Works | — |
+| Agents roster | `/agents` | 🟡 Partial | Add availability, skills display |
+| AI Models | `/models` | 🟡 Partial | Add capability tags |
+| Users list | `/users` | ❌ Missing | New screen: list, create, detail |
+| User detail | `/users/{id}` | ❌ Missing | Profile + role assignments |
+| Sprint detail | `/project/{id}/sprints/{sid}` | 🟡 Partial | Add burndown data, standup log |
+| Task Queue | `/ops/tasks` | ❌ Missing | New screen: queue + execution log |
+| Notifications | `/notifications` | ❌ Missing | New screen: inbox + mark read |
+| Reports | `/reports` | ❌ Missing | New screen: velocity, burndown |
+| Audit log | `/audit` | ❌ Missing | New screen: access_log table |
+| Approval workflows | `/approvals` | ❌ Missing | New screen: pending approvals |
+| Wiki | `/wiki` | ❌ Missing | New screen: page list + editor |
+
+**Output:** All routes functional against real DB. No 404s. No in-memory data remaining.
+
+**Definition of done:**
+- `GET /` shows real projects from DB
+- All 16 screens above render without error
+- No `PROJECTS = [...]` hard-coded lists anywhere in `routes.py`
+- HTMX actions (estimate, status-change, reorder) all hit real DB endpoints
+
+---
+
+### Phase C — Catalog Writing 📅 Sprint 2 (start)
+
+**Owner:** Claude (current session)
+**Branch:** `feature/phase-c-catalog`
+**Estimated effort:** 2–3 days
+**Depends on:** Phase A + Phase B
+**Unblocks:** ALL other agents (Phases 3–10)
+
+Write two reference documents that serve as the contract for all secondary clients.
+
+#### C.1 — DB Schema Catalog (`docs/DB_CATALOG.md`)
+
+One section per table, in group order. For each table:
+
+```markdown
+### `table_name`
+**Group:** AI & Identity
+**Purpose:** One-line description of what this table stores
+
+| Column | Type | Nullable | FK | Notes |
+|--------|------|----------|----|-------|
+| id | String(36) | No | — | UUID primary key |
+| name | String(100) | No | — | Display name |
+| ...
+
+**Indexes:** id (PK), project_id (FK index)
+**Relationships:** belongs_to projects, has_many sprint_issues
+**Seed data:** 2 rows pre-created on startup
+```
+
+#### C.2 — Web UI + API Route Catalog (`docs/ROUTE_CATALOG.md`)
+
+One entry per route. Grouped by domain (Auth, Projects, Backlog, Sprints, Agents, Admin). For each route:
+
+```markdown
+### `GET /project/{project_id}/backlog`
+**Purpose:** Render the backlog tab for a project
+**Auth:** Cookie (`auth_token`)
+**Path params:** `project_id` — UUID of the project
+**Query params:** `status` (optional filter)
+**Returns:** HTML page — `BacklogScreen`
+**Data sources:** `issues`, `sprints`, `issue_assignments`
+**HTMX actions on this page:**
+  - `POST /project/{id}/issues/{iid}/status` — inline status update
+  - `POST /project/{id}/backlog/reorder` — drag reorder
+```
+
+**Definition of done:**
+- `docs/DB_CATALOG.md` has an entry for every one of the 85 tables
+- `docs/ROUTE_CATALOG.md` has an entry for every route in `routes.py` and `admin.py`
+- Both documents are cross-referenced (routes reference which DB tables they query)
+- Agent Alpha can build the CLI by reading only `ROUTE_CATALOG.md` — no source code needed
+
+---
+
+### Phase 3 — CLI (`agileai/cli/`) 📅 Sprint 2
 
 **Owner:** Agent Alpha  
 **Branch:** `feature/phase-3-cli`  
@@ -87,7 +253,7 @@ agileai config set-url http://localhost:8000
 
 ---
 
-### Phase 4 — TUI (`agileai/tui/`) 📅 Sprint 1
+### Phase 4 — TUI (`agileai/tui/`) 📅 Sprint 3
 
 **Owner:** Agent Beta  
 **Branch:** `feature/phase-4-tui`  
@@ -120,7 +286,7 @@ Build a Textual-based terminal UI. Uses the async HTTP client.
 
 ---
 
-### Phase 5 — Desktop (`agileai/desktop/`) 📅 Sprint 2
+### Phase 5 — Desktop (`agileai/desktop/`) 📅 Sprint 3
 
 **Owner:** Agent Gamma  
 **Branch:** `feature/phase-5-desktop`  
@@ -152,7 +318,7 @@ Build a PyQt6 desktop application.
 
 ---
 
-### Phase 6 — Agent Gateway (`agileai/agents/`) 📅 Sprint 2
+### Phase 6 — Agent Gateway (`agileai/agents/`) 📅 Sprint 4
 
 **Owner:** Agent Alpha (Sprint 2)  
 **Branch:** `feature/phase-6-gateway`  
@@ -189,7 +355,7 @@ POST /api/v1/tasks/assign                     → assign issue to agent
 
 ---
 
-### Phase 7 — Telegram Bot 📅 Sprint 2
+### Phase 7 — Telegram Bot 📅 Sprint 4
 
 **Owner:** Agent Beta (Sprint 2)  
 **Branch:** `feature/phase-7-telegram`  
@@ -214,7 +380,7 @@ POST /api/v1/tasks/assign                     → assign issue to agent
 
 ---
 
-### Phase 8 — Compression Agent (Ollama) 📅 Sprint 3
+### Phase 8 — Compression Agent (Ollama) 📅 Sprint 4
 
 **Owner:** Agent Gamma (Sprint 2+)  
 **Branch:** `feature/phase-8-compression`  
@@ -238,7 +404,7 @@ Runs continuously as a background worker. Processes `background_jobs` with
 
 ---
 
-### Phase 9 — Backend API Expansion 📅 Sprint 1–3
+### Phase 9 — Backend API Expansion 📅 Sprint 2–4
 
 **Owner:** Agent Delta (ongoing)  
 **Branch:** `feature/phase-9-api-expansion`
@@ -263,7 +429,7 @@ Expand the ~30% API coverage to 100%. Currently only backlog API is fully implem
 
 ---
 
-### Phase 10 — Production Hardening 📅 Sprint 3
+### Phase 10 — Production Hardening 📅 Sprint 5
 
 **Owner:** Agent Delta  
 **Branch:** `feature/phase-10-production`  
@@ -299,7 +465,10 @@ Expand the ~30% API coverage to 100%. Currently only backlog API is fully implem
 
 The project is "done" when:
 
-- [ ] All 10 phases complete
+- [ ] Phase A complete: all 85 ORM tables fully specified, `docs/DB_CHANGES.md` written
+- [ ] Phase B complete: all 16 Web UI screens functional against real DB
+- [ ] Phase C complete: `docs/DB_CATALOG.md` and `docs/ROUTE_CATALOG.md` published
+- [ ] All 10 phases complete (3–10 build on catalog)
 - [ ] All 5 frontends functional: Web, CLI, TUI, Desktop, Telegram
 - [ ] Agent gateway operational: actors can poll, execute, and submit
 - [ ] Compression agent running against Ollama
@@ -322,6 +491,8 @@ The project is "done" when:
 | SQLite concurrency limits | Medium | Medium | Use WAL mode (already enabled via aiosqlite) |
 | Circular imports (web ↔ api) | Done | Done | Resolved by lazy imports in web module |
 | DB schema drift between worktree and main | Medium | High | Always delete DB and re-create when changing models |
+| DB schema incomplete before clients start | Mitigated | High | Phase A audit completes schema before any agent starts Phase 3+ |
+| Catalog becoming stale | Low | Medium | Catalog is generated from source after Phase B; re-generate on schema changes |
 
 ---
 

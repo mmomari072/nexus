@@ -20,12 +20,38 @@ Read this before starting any work. Also read `DEVELOPMENT_PLAN.md` and `docs/WO
 
 ---
 
+## Claude — Architect (Phase A · Phase B · Phase C)
+
+### Sprint 1 Scope (Phase A + B)
+Complete the DB schema and Web UI before other agents start their tracks.
+See `DEVELOPMENT_PLAN.md §Phase A` and `§Phase B` for full task lists.
+
+**Phase A — DB audit checklist:**
+1. Read `__init__.py` group by group (14 groups, 85 tables)
+2. For each table check: all business fields present, correct types, FK declared, nullable/index set
+3. Add missing columns as `nullable=True` (Alembic not yet set up)
+4. Delete `agileai.db` and verify server starts cleanly after each group
+5. Write `docs/DB_CHANGES.md` as you go
+
+**Phase B — Web UI checklist:**
+1. Replace `PROJECTS = [...]` in `routes.py` with `await db.execute(select(Project)...)`
+2. Build each missing screen listed in `DEVELOPMENT_PLAN.md §Phase B`
+3. Every new screen must query real DB — no hard-coded lists
+4. Test every screen manually via browser before moving on
+
+### Sprint 2 Scope (Phase C)
+Write `docs/DB_CATALOG.md` and `docs/ROUTE_CATALOG.md`.
+Format is specified in `DEVELOPMENT_PLAN.md §Phase C`.
+
+---
+
 ## Agent Alpha — Actor (CLI + Agent Gateway)
 
-### Sprint 1 Scope
-Build `agileai/cli/` from scratch. This is a terminal command-line interface using Typer + Rich.
-
 ### Sprint 2 Scope
+Build `agileai/cli/` from scratch. This is a terminal command-line interface using Typer + Rich.
+**Read `docs/ROUTE_CATALOG.md` before writing any CLI command — it lists every API endpoint.**
+
+### Sprint 4 Scope
 Build `agileai/agents/gateway.py` — the FastAPI router that agents poll for tasks.
 
 ### Starting Point

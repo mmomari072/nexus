@@ -169,6 +169,35 @@ TOOLS = [
 
 ---
 
+## ADR-007: DB-First, Web UI as Ground Truth
+
+**Status:** Accepted
+**Date:** 2026-05-23
+
+**Context:** With 85 ORM tables as stubs and 4 secondary clients planned (CLI, TUI, Desktop,
+Agent Gateway), there was a risk that each client team would independently interpret the data
+model — producing field-name drift, duplicate HTTP calls, and integration bugs discovered late.
+
+**Decision:** Before any secondary client is built:
+1. **Phase A** — Complete the DB schema (all 85 tables fully specified)
+2. **Phase B** — Complete the Web UI (all screens functional against real DB, no in-memory data)
+3. **Phase C** — Write two catalog documents:
+   - `docs/DB_CATALOG.md` — one entry per table: columns, types, FKs, indexes, seed data
+   - `docs/ROUTE_CATALOG.md` — one entry per route: params, auth, data sources, HTMX actions
+
+Secondary clients (Phases 3–10) start only after the catalog is published.
+
+**Consequences:**
+- ✅ Single source of truth for data shapes — catalog consumed by all agent teams
+- ✅ Web UI proves the schema works end-to-end before other clients are built
+- ✅ Agent Alpha / Beta / Gamma can build CLI / TUI / Desktop reading catalog only — no source code diving
+- ✅ Schema bugs discovered in Phase A/B, not in Phase 3–5 integration
+- ❌ Sprint 1 has no secondary client output — only DB + Web UI
+- ❌ Catalog maintenance burden — must be regenerated on schema changes
+- Mitigation: Catalog is generated after Phase B is stable; schema changes require catalog update PR
+
+---
+
 ## Module Structure Reference
 
 ```

@@ -24,6 +24,28 @@ Most recent entries at the top.
 
 ## Architecture Decision Log
 
+### 2026-05-23 — DB-first strategy adopted
+
+Mohammad OMARI requested a revised development strategy: complete the DB schema and Web UI
+before building any secondary clients. Rationale: prevents field-name drift across clients,
+proves the data model end-to-end, and produces a catalog that all agent teams can use as a
+contract without reading source code.
+
+**New phases added:**
+- Phase A — DB Design Completion (all 85 tables fully specified)
+- Phase B — Web UI Completion (all screens functional against real DB)
+- Phase C — Catalog Writing (`docs/DB_CATALOG.md` + `docs/ROUTE_CATALOG.md`)
+
+**Impact on roadmap:**
+- Sprint 1 goal changed from "CLI + TUI functional" to "DB schema finalized + Web UI complete"
+- Original Sprint 1 work (CLI, TUI, API expansion) moved to Sprint 2
+- Sprint count increased from 4 to 5 (v1.0.0 target: 2026-08-01 vs. 2026-07-18)
+- ADR-007 documents the decision in `docs/ARCHITECTURE.md`
+
+**Artifacts updated:** DEVELOPMENT_PLAN.md, ROADMAP.md, docs/SPRINT_01.md, docs/BOARD.md, docs/ARCHITECTURE.md
+
+---
+
 ### 2026-05-23 — Multi-agent development plan created
 
 Mohammad OMARI requested a full development plan with artifacts for multi-agent parallel development. Created:
